@@ -63,8 +63,14 @@ function Invoke-Fixture([bool]$Replay, [string]$Destination, [string]$ExpectedOu
             if ($inspection.counts.unexecuted_planned_tail -ne 0 -or $inspection.counts.planned_inputs -ne 2) {
                 throw "Smoke fixture did not execute its complete two-event plan: $Destination"
             }
-            $push = @($data.attempt.inputs | Where-Object { $_.phase -eq 'push' -and $_.pressed })
-            $release = @($data.attempt.inputs | Where-Object { $_.phase -eq 'release' -and -not $_.pressed })
+            $push = @($data.attempt.inputs | Where-Object {
+                $_.phase -eq 'push' -and $_.pressed -and $_.player -eq 1 -and $_.button -eq 1 -and
+                $_.command_index -eq 60 -and $_.native_return -eq $true
+            })
+            $release = @($data.attempt.inputs | Where-Object {
+                $_.phase -eq 'release' -and -not $_.pressed -and $_.player -eq 1 -and $_.button -eq 1 -and
+                $_.command_index -eq 90 -and $_.native_return -eq $true
+            })
             if (-not $push.Count -or -not $release.Count) {
                 throw "Native player push/release callbacks are missing: $Destination"
             }
