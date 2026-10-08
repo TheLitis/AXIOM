@@ -10,9 +10,11 @@ AXIOM is an open research project for measuring Geometry Dash difficulty through
 
 The central question is: *What is the probability that a player with a specified skill profile completes this exact challenge after a specified amount of practice, under specified technical conditions?*
 
-## Current status: offline research alpha
+## Current status: offline laboratory and experimental native observer
 
-Version 0.1 is a working, dependency-free Python laboratory with an interactive offline report. It is **not yet a native game analyzer or a validated human difficulty model**. The repository publishes synthetic examples, a transparent statistical baseline and explicit gates toward real measurements. There are no established AR scores for real levels, no GRIEF/Slaughterhouse difficulty ratio, and no claim of a universal human limit.
+The released v0.1.0 is a dependency-free Python laboratory with an interactive offline report. Current development adds an experimental, opt-in Windows x64 / GD 2.2081 / Geode 5.8.2 observer and command-call replay. **Human difficulty remains uncalibrated and the complete M1 acceptance gate remains open.** Native origin declared in an imported file is not authenticated by the Python inspector. There are no established AR scores for real levels, no GRIEF/Slaughterhouse difficulty ratio, and no claim of a universal human limit.
+
+The [native validation ledger](docs/native-validation.md) records actual engine loading, a baseline, three replay completions with player push/release and a jump response, native death and wrong-level rejection. Exact replay comparison **failed** on recorded callback flags and selected player fields; this divergence remains visible and blocks repeatability acceptance. Raw captures and game binaries stay local.
 
 | Available now | Evidence and limits |
 |---|---|
@@ -22,6 +24,8 @@ Version 0.1 is a working, dependency-free Python laboratory with an interactive 
 | Correlated-noise experiments | Seeded Gaussian jitter, common shift, stationary AR(1) drift; declared assumptions, not measured human abilities |
 | Censored first-completion statistics | Kaplan–Meier curve, supported T50, conservative participant bootstrap, compatible provisional AR |
 | Supplied terminal-oracle ledger checks | Exact manifest consistency and observed repeatability; does not run/authenticate the engine |
+| Experimental native capture and replay | Version-specific Geode source, local opt-in capture, binary manifests, native death/finish callbacks and selected player fields; incomplete configuration/state coverage |
+| Native capture inspection/comparison | Strict integrity and identity checks; exact comparison of recorded replay subsets; files alone do not establish complete engine determinism |
 | Portable HTML and JSON | Interactive route selection, window/first-completion plots, source identity and interpretation limits; works offline |
 | Research framework | 64 proposed factors, telemetry design, baseline comparisons and a gated implementation roadmap |
 
@@ -49,9 +53,11 @@ axiom replay examples/replays/synthetic.gdr.json --json reports/replay.json
 axiom timing examples/timing.json --trials 20000 --seed 42 --html reports/timing.html
 axiom cohort examples/cohort.json --bootstrap 1000 --seed 42 --html reports/cohort.html
 axiom trials examples/trials.json --json reports/trials.json
+axiom native examples/native/synthetic-capture-a.json --json reports/native.json
+axiom native-compare examples/native/synthetic-capture-a.json examples/native/synthetic-capture-b.json --json reports/native-comparison.json
 ```
 
-All commands validate input; unknown evidence remains unknown. See [import formats](docs/formats.md), [timing scenarios](docs/timing-format.md), [cohorts](docs/survival-format.md) and [oracle ledgers](docs/oracle-format.md).
+All commands validate input; unknown evidence remains unknown. The native examples above are synthetic schema fixtures. See [import formats](docs/formats.md), [timing scenarios](docs/timing-format.md), [cohorts](docs/survival-format.md), [oracle ledgers](docs/oracle-format.md) and [native operation and acceptance](docs/native-adapter.md). Building the native mod requires a separate compiler/SDK setup; Python analysis remains dependency-free.
 
 ## What AR means
 
@@ -71,9 +77,9 @@ Physical feasibility, execution difficulty and learning difficulty remain separa
 
 ## Next scientific milestone
 
-Build a version-specific native Geode adapter that records game-scoped input and full-run outcomes in a legally installed game. Verify deterministic replay from the true start before deriving timing windows. Then test whether a calibrated section-success model improves predictions on unseen players against an independent-window baseline.
+Complete the native adapter acceptance matrix: true-start replay agreement, explicit clock/phase semantics, nontrivial press/release and negative controls, complete environment coverage, recording overhead and measured throughput. Verify repeatability before deriving timing windows. Then test whether a calibrated section-success model improves predictions on unseen players against an independent-window baseline.
 
-Native integration, automatic window discovery, perception/learning models and real-level leaderboards are **planned work**, with acceptance gates in the [roadmap](docs/roadmap.md). Geode, Frame Window Counter, NaNDL and the statistical/motor-control literature are prior work, documented with primary references in [research sources](docs/research-sources.md).
+Native integration is experimental; automatic window discovery, perception/learning models and real-level leaderboards remain **planned work**, with acceptance gates in the [roadmap](docs/roadmap.md). Geode, Frame Window Counter, NaNDL and the statistical/motor-control literature are prior work, documented with primary references in [research sources](docs/research-sources.md).
 
 ## Contribute
 

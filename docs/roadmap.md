@@ -11,7 +11,9 @@ This is a gated research roadmap, not a claim that every stage is implemented. D
 | M4 — Full-level time model | Persistent state across sections; active-time first-completion forecasts; versioned reference package | Held-out levels and future campaigns; censoring/quit treatment; reference T50 supported; coverage and calibration acceptable under frozen criteria | AR with scope and uncertainty in the calibrated domain |
 | M5 — Public research service | Reproducible evidence pages, versioned comparisons, data/model cards, correction process | Independent replication, provenance review, operational checks and consented releases | Public ratings with audit trails and explicit limits |
 
-The M0 offline implementation is available in v0.1.0 for its documented formats and scenarios. M1–M5 require new engineering or data; this repository has not established their evidence gates. [Final-system requirements](end-goal-requirements.md) maps current code to the end-state contract, prerequisites and critical path.
+The M0 offline implementation is available in v0.1.0 for its documented formats and scenarios. Current development includes an [experimental M1 observer/replay adapter](native-adapter.md) and strict capture comparison. Its complete acceptance gate remains open; M2–M5 require new engineering or data. [Final-system requirements](end-goal-requirements.md) maps the v0.1.0 baseline to the end-state contract, prerequisites and critical path.
+
+The [native validation ledger](native-validation.md) records real-engine completion, press/release response and terminal controls. Exact repeated traces diverge under the tested incomplete configuration; M1 repeatability remains a failed gate. The next engineering step is to characterize the command/render scheduling and terminal transition, then test replay under an explicitly controlled clock and broader fixture matrix.
 
 ## First human benchmark
 
