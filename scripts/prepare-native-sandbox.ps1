@@ -60,6 +60,10 @@ $expectedGameHash = 'fc5a16c292278bc2e8e078fb1d5023c2bd658322dd72712767ea70c2dd9
 if ((Get-FileHash -LiteralPath $gameExe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedGameHash) {
     throw 'This sandbox fixture has only been scoped to the pinned GD 2.2081 game binary.'
 }
+$expectedLoaderHash = '61847e05d4aa416bfd4d1f4e026b5b0e66848756473b285add6233a5cc9356d2'
+if ((Get-FileHash -LiteralPath (Join-Path $gameDir 'Geode.dll') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedLoaderHash) {
+    throw 'This sandbox fixture requires the pinned Geode 5.8.2 loader binary.'
+}
 if (-not $NativePackage) { $NativePackage = Join-Path $workspace 'native/build/axiom.native-capture.geode' }
 $packagePath = (Resolve-Path -LiteralPath $NativePackage).Path
 New-Item -ItemType Directory -Force $runtimeDir | Out-Null
