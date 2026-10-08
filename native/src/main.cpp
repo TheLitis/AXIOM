@@ -1,0 +1,472 @@
+#include <Geode/Geode.hpp>
+#include <Geode/modify/GJBaseGameLayer.hpp>
+#include <Geode/modify/PlayLayer.hpp>
+#include <Geode/modify/PlayerObject.hpp>
+#include <Windows.h>
+#include <bcrypt.h>
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <fstream>
+#include <map>
+#include <memory>
+#include <set>
+#include <stdexcept>
+
+using namespace geode::prelude;
+namespace axiom {
+using Json = matjson::Value;
+using Clock = std::chrono::steady_clock;
+constexpr size_t MaxBytes = 16 * 1024 * 1024;
+constexpr size_t MaxCommands = 20000;
+constexpr size_t MaxInputs = 12000;
+constexpr char Policy[] = "process-commands-pre-hook-v1";
+
+// Environment documents contain no floating point values. Sorting keys recursively
+// matches Python's compact, sorted, ensure_ascii=False JSON for these documents.
+std::string canonical(Json const& value) {
+    if (value.isObject()) {
+        std::map<std::string, Json const*> entries;
+        for (auto const& entry : value) entries.emplace(entry.getKey().value(), &entry);
+        std::string result = "{";
+        bool first = true;
+        for (auto const& [key, entry] : entries) {
+            if (!first) result += ',';
+            first = false;
+            result += Json(key).dump(0) + ':' + canonical(*entry);
+        }
+        return result + '}';
+    }
+    if (value.isArray()) {
+        std::string result = "[";
+        bool first = true;
+        for (auto const& entry : value) {
+            if (!first) result += ',';
+            first = false;
+            result += canonical(entry);
+        }
+        return result + ']';
+    }
+    return value.dump(0);
+}
+
+class Sha256 {
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    BCRYPT_HASH_HANDLE hash = nullptr;
+public:
+    Sha256() {
+        if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0)
+            throw std::runtime_error("SHA256 provider unavailable");
+        if (BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) < 0) {
+            BCryptCloseAlgorithmProvider(algorithm, 0);
+            algorithm = nullptr;
+            throw std::runtime_error("SHA256 hash unavailable");
+        }
+    }
+    ~Sha256() {
+        if (hash) BCryptDestroyHash(hash);
+        if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+    }
+    void update(char const* data, size_t size) {
+        if (size > ULONG_MAX || BCryptHashData(hash, reinterpret_cast<PUCHAR>(const_cast<char*>(data)),
+                static_cast<ULONG>(size), 0) < 0) throw std::runtime_error("SHA256 update failed");
+    }
+    std::string finish() {
+        std::array<UCHAR, 32> digest{};
+        if (BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) < 0)
+            throw std::runtime_error("SHA256 finish failed");
+        char const* hex = "0123456789abcdef";
+        std::string result;
+        for (auto byte : digest) { result += hex[byte >> 4]; result += hex[byte & 15]; }
+        return result;
+    }
+};
+std::string sha(std::string const& text) { Sha256 hash; hash.update(text.data(), text.size()); return hash.finish(); }
+std::string fileSha(std::filesystem::path const& path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) throw std::runtime_error("Cannot hash runtime binary");
+    Sha256 hash;
+    std::array<char, 65536> bytes{};
+    while (stream) { stream.read(bytes.data(), bytes.size()); hash.update(bytes.data(), stream.gcount()); }
+    if (!stream.eof()) throw std::runtime_error("Runtime binary read failed");
+    return hash.finish();
+}
+std::filesystem::path executablePath() {
+    std::array<wchar_t, 32768> buffer{};
+    auto length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (!length || length >= buffer.size()) throw std::runtime_error("Executable identity unavailable");
+    return std::filesystem::path(std::wstring(buffer.data(), length));
+}
+Json environment() {
+    std::vector<Mod*> mods;
+    for (auto mod : Loader::get()->getAllMods()) if (mod->isLoaded()) mods.push_back(mod);
+    std::sort(mods.begin(), mods.end(), [](auto a, auto b) { return std::string(a->getID()) < std::string(b->getID()); });
+    Json manifest = Json::array();
+    for (auto mod : mods) {
+        auto binary = mod->getBinaryPath();
+        // The loader's internal Mod has no separate mod DLL. Hash its real loader DLL.
+        if (mod->isInternal()) binary = executablePath().parent_path() / "Geode.dll";
+        manifest.push(matjson::makeObject({{"id", std::string(mod->getID())},
+            {"version", mod->getVersion().toNonVString()}, {"binary_sha256", fileSha(binary)}}));
+    }
+    return matjson::makeObject({
+        {"game_executable_sha256", fileSha(executablePath())}, {"game_version", "2.2081"},
+        {"geode_version", Loader::get()->getVersion().toNonVString()},
+        {"adapter_binary_sha256", fileSha(Mod::get()->getBinaryPath())},
+        {"platform", "windows-x64"}, {"mods", manifest}, {"configuration_complete", false},
+        {"input_policy", Policy}, {"clocks", matjson::makeObject({
+            {"unit", "processCommands_call_index"}, {"dt_unit", "seconds_as_passed_to_hook"},
+            {"hardware_arrival", "unknown"}, {"render_cadence", "not_captured"}})}});
+}
+double checked(double value) {
+    if (!std::isfinite(value)) throw std::runtime_error("Nonfinite selected engine state");
+    return value;
+}
+Json playerState(PlayerObject* player) {
+    if (!player) return nullptr;
+    auto position = player->getPosition();
+    char const* mode = player->m_isShip ? "ship" : player->m_isBird ? "ufo" : player->m_isBall ? "ball" :
+        player->m_isDart ? "wave" : player->m_isRobot ? "robot" : player->m_isSpider ? "spider" :
+        player->m_isSwing ? "swing" : "cube";
+    return matjson::makeObject({{"x", checked(position.x)}, {"y", checked(position.y)},
+        {"y_velocity", checked(player->m_yVelocity)}, {"rotation", checked(player->getRotation())},
+        {"is_dead", player->m_isDead}, {"mode", mode}});
+}
+Json state(GJBaseGameLayer* layer) {
+    return matjson::makeObject({{"player1", playerState(layer->m_player1)}, {"player2", playerState(layer->m_player2)}});
+}
+struct ReplayEvent { uint64_t command; int player; int button; bool pressed; };
+uint64_t integer(Json const& value, uint64_t minimum, uint64_t maximum) {
+    if (!value.isExactlyInt() && !value.isExactlyUInt()) throw std::runtime_error("Replay integer required");
+    auto result = value.asUInt();
+    if (!result || result.unwrap() < minimum || result.unwrap() > maximum) throw std::runtime_error("Replay integer out of range");
+    return result.unwrap();
+}
+std::string string(Json const& value) {
+    if (!value.isString()) throw std::runtime_error("Replay string required");
+    return value.asString().unwrap();
+}
+bool digest(std::string const& text) {
+    return text.size() == 64 && std::all_of(text.begin(), text.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+}
+// Bound parser recursion before calling the SDK parser, and reject duplicate
+// object keys instead of allowing ambiguous replay plans to overwrite values.
+void checkJsonSafety(std::string const& raw) {
+    struct Container { bool object; bool expectsKey; std::set<std::string> keys; };
+    std::vector<Container> stack;
+    size_t tokens = 0;
+    for (size_t i = 0; i < raw.size(); ++i) {
+        char c = raw[i];
+        if (c == '"') {
+            if (++tokens > 50000) throw std::runtime_error("Replay JSON token budget exceeded");
+            auto start = i++;
+            for (; i < raw.size(); ++i) {
+                if (raw[i] == '\\') { if (++i == raw.size()) throw std::runtime_error("Truncated JSON escape"); }
+                else if (raw[i] == '"') break;
+            }
+            if (i == raw.size()) throw std::runtime_error("Unterminated JSON string");
+            if (!stack.empty() && stack.back().object && stack.back().expectsKey) {
+                auto parsed = Json::parse(std::string_view(raw).substr(start, i - start + 1));
+                if (!parsed || !parsed.unwrap().isString()) throw std::runtime_error("Invalid JSON key");
+                auto key = parsed.unwrap().asString().unwrap();
+                if (!stack.back().keys.insert(key).second) throw std::runtime_error("Duplicate JSON object key");
+                stack.back().expectsKey = false;
+            }
+        } else if (c == '{' || c == '[') {
+            if (++tokens > 50000) throw std::runtime_error("Replay JSON token budget exceeded");
+            if (stack.size() >= 64) throw std::runtime_error("Replay JSON nesting exceeds 64");
+            stack.push_back({c == '{', c == '{', {}});
+        } else if (c == '}' || c == ']') {
+            if (stack.empty() || stack.back().object != (c == '}')) throw std::runtime_error("Unbalanced replay JSON");
+            stack.pop_back();
+        } else if (c == ',' && !stack.empty() && stack.back().object) stack.back().expectsKey = true;
+        else if ((c >= '0' && c <= '9') || c == '-' || c == 't' || c == 'f' || c == 'n') {
+            if (++tokens > 50000) throw std::runtime_error("Replay JSON token budget exceeded");
+            while (i + 1 < raw.size() && raw[i + 1] != ',' && raw[i + 1] != '}' && raw[i + 1] != ']' &&
+                raw[i + 1] != ' ' && raw[i + 1] != '\t' && raw[i + 1] != '\r' && raw[i + 1] != '\n') ++i;
+        }
+    }
+    if (!stack.empty()) throw std::runtime_error("Unclosed replay JSON container");
+}
+void onlyKeys(Json const& value, std::set<std::string> const& keys) {
+    if (!value.isObject()) throw std::runtime_error("Replay object required");
+    for (auto const& entry : value) if (!keys.contains(entry.getKey().value())) throw std::runtime_error("Unknown replay field");
+    if (value.size() != keys.size()) throw std::runtime_error("Missing replay field");
+}
+struct Run {
+    GJBaseGameLayer* layer;
+    Json document;
+    uint64_t command = 0;
+    uint64_t sequence = 0;
+    uint64_t dropped = 0;
+    bool inCommand = false;
+    bool injecting = false;
+    bool replay = false;
+    bool terminal = false;
+    bool complete = true;
+    Clock::time_point start = Clock::now();
+    std::vector<ReplayEvent> planned;
+    size_t next = 0;
+    explicit Run(GJBaseGameLayer* owner) : layer(owner) {}
+    Json& attempt() { return document["attempt"]; }
+    void error(std::string const& message) {
+        complete = false;
+        document["integrity"]["errors"].push(message);
+    }
+    void trace(float dt, bool half, bool last) {
+        if (attempt()["trace"].size() >= MaxCommands + 1) { ++dropped; throw std::runtime_error("Command trace limit reached"); }
+        attempt()["trace"].push(matjson::makeObject({{"command_index", command}, {"dt_seconds", checked(dt)},
+            {"is_half_tick", half}, {"is_last_tick", last}, {"state", state(layer)}}));
+    }
+    void input(int button, int player, bool pressed, char const* phase, Json returned = nullptr) {
+        if (terminal) return;
+        if (button < 1 || button > 3) throw std::runtime_error("Unsupported native button");
+        if (attempt()["inputs"].size() >= MaxInputs) { ++dropped; throw std::runtime_error("Input trace limit reached"); }
+        auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
+        attempt()["inputs"].push(matjson::makeObject({{"sequence", sequence++}, {"command_index", command},
+            {"player", player}, {"button", button}, {"pressed", pressed}, {"phase", phase},
+            {"source", replay ? "replay" : "observed"}, {"native_return", returned}, {"wall_time_ns", elapsed}}));
+    }
+    void finish(char const* outcome, char const* event) {
+        if (terminal) return;
+        terminal = true;
+        attempt()["terminal"] = matjson::makeObject({{"outcome", outcome}, {"event", event},
+            {"command_index", command}, {"wall_elapsed_seconds", std::chrono::duration<double>(Clock::now() - start).count()},
+            {"state", state(layer)}});
+    }
+    void loadReplay(std::string const& levelHash, std::string const& envHash) {
+        std::ifstream stream(Mod::get()->getSaveDir() / "replay.json", std::ios::binary);
+        if (!stream) throw std::runtime_error("Cannot read replay.json");
+        std::string raw(MaxBytes + 1, '\0');
+        stream.read(raw.data(), raw.size());
+        raw.resize(stream.gcount());
+        if (raw.size() > MaxBytes || (!stream.eof() && !stream)) throw std::runtime_error("Replay exceeds limit or read failed");
+        checkJsonSafety(raw);
+        auto parsed = Json::parse(raw);
+        if (!parsed) throw std::runtime_error("Invalid replay JSON");
+        auto data = parsed.unwrap();
+        onlyKeys(data, {"schema_version", "kind", "clock", "level_sha256", "environment_sha256", "inputs"});
+        if (!data.isObject() || integer(data["schema_version"], 1, 1) != 1 || string(data["kind"]) != "native_replay" ||
+            string(data["clock"]) != "processCommands_call_index") throw std::runtime_error("Unsupported replay format/clock");
+        auto target = string(data["level_sha256"]);
+        if (!digest(target) || target != levelHash) throw std::runtime_error("Replay level hash mismatch");
+        auto expectedEnvironment = string(data["environment_sha256"]);
+        if (!digest(expectedEnvironment) || expectedEnvironment != envHash) throw std::runtime_error("Replay environment hash mismatch");
+        if (!data["inputs"].isArray() || data["inputs"].size() > 4000) throw std::runtime_error("Replay event limit or invalid inputs");
+        uint64_t previous = 0;
+        for (auto const& entry : data["inputs"]) {
+            onlyKeys(entry, {"command_index", "player", "button", "pressed"});
+            if (!entry.isObject() || !entry["pressed"].isBool()) throw std::runtime_error("Invalid replay event");
+            auto commandIndex = integer(entry["command_index"], 1, MaxCommands);
+            if (commandIndex < previous) throw std::runtime_error("Replay events must be ordered");
+            previous = commandIndex;
+            planned.push_back({commandIndex, static_cast<int>(integer(entry["player"], 1, 2)),
+                static_cast<int>(integer(entry["button"], 1, 3)), entry["pressed"].asBool().unwrap()});
+        }
+        attempt()["replay_sha256"] = sha(raw);
+        attempt()["planned_inputs"] = data["inputs"];
+    }
+};
+std::unique_ptr<Run> active;
+GJBaseGameLayer* initializing = nullptr;
+bool initCommandSeen = false;
+GJBaseGameLayer* resetting = nullptr;
+bool resetCommandSeen = false;
+PlayLayer* pendingStart = nullptr;
+bool pendingStartUncertain = false;
+uint64_t runId = 0;
+bool option(char const* setting, char const* flag) { return Mod::get()->getSettingValue<bool>(setting) || Mod::get()->getLaunchFlag(flag); }
+
+void exportRun() {
+    if (!active || !active->terminal || active->inCommand) return;
+    auto run = std::move(active);
+    if (auto indicator = run->layer->getChildByID("axiom-capture-indicator")) indicator->removeFromParent();
+    run->document["integrity"]["recording_complete"] = run->complete;
+    run->document["integrity"]["dropped_records"] = run->dropped;
+    try {
+        auto text = run->document.dump(2);
+        if (text.size() > MaxBytes) throw std::runtime_error("Capture export exceeds 16 MiB");
+        auto folder = Mod::get()->getSaveDir() / "captures";
+        std::filesystem::create_directories(folder);
+        auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        auto filename = folder / (std::to_string(now) + "-" + std::to_string(runId) + ".json");
+        auto temporary = filename; temporary += ".tmp";
+        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+        if (!stream) throw std::runtime_error("Capture output could not be opened");
+        stream.write(text.data(), text.size()); stream.close();
+        if (!stream) throw std::runtime_error("Capture output write failed");
+        std::filesystem::rename(temporary, filename);
+        log::info("AXIOM native capture exported locally: {}", filename.string());
+    } catch (std::exception const& error) { log::error("AXIOM capture export failed; no complete artifact: {}", error.what()); }
+}
+void fail(std::string const& message) {
+    log::error("AXIOM capture error: {}", message);
+    if (!active) return;
+    active->error(message);
+    try { active->finish("error", "AXIOM::error"); }
+    catch (...) { active.reset(); return; }
+    exportRun();
+}
+void stop(char const* outcome, char const* event) {
+    if (!active) return;
+    try { active->finish(outcome, event); exportRun(); } catch (std::exception const& error) { fail(error.what()); }
+}
+void begin(PlayLayer* layer, bool uncertainStart = false) {
+    if (active) stop("aborted", "PlayLayer::resetLevel");
+    if (!option("capture-enabled", "capture") && !option("replay-enabled", "replay")) return;
+    if (Loader::get()->getVersion() != VersionInfo(5, 8, 2)) { log::error("AXIOM capture requires Geode 5.8.2"); return; }
+    try {
+        auto env = environment();
+        auto envHash = sha(canonical(env));
+        auto levelRaw = std::string(layer->m_level->m_levelString);
+        if (levelRaw.empty() || levelRaw.size() > MaxBytes) throw std::runtime_error("Raw native level string missing or oversized");
+        auto levelHash = sha(levelRaw);
+        auto startKind = uncertainStart ? "unknown" : layer->m_isPracticeMode ? "practice" : layer->m_startPosObject ? "start_position" : "level_start";
+        active = std::make_unique<Run>(layer);
+        active->replay = option("replay-enabled", "replay");
+        active->document = matjson::makeObject({
+            {"schema_version", 1}, {"kind", "native_capture"},
+            {"provenance", matjson::makeObject({{"origin", "native-engine-capture"}, {"independently_verified", false}, {"state_completeness", "selected_fields_only"}})},
+            {"collector", matjson::makeObject({{"id", "axiom.native-capture"}, {"version", "0.1.0"},
+                {"source_commit", AXIOM_SOURCE_COMMIT}, {"source_tree_sha256", AXIOM_SOURCE_TREE_SHA256},
+                {"sdk_commit", AXIOM_SDK_COMMIT}, {"bindings_commit", AXIOM_BINDINGS_COMMIT}})},
+            {"environment", env}, {"environment_sha256", envHash},
+            {"challenge", matjson::makeObject({{"id", "native-" + levelHash.substr(0, 16)}, {"level_sha256", levelHash},
+                {"game_version", "2.2081"}, {"physics_version", "native-2.2081-uncharacterized"},
+                {"input_policy", Policy}, {"environment_id", envHash}})},
+            {"state_fields", Json(std::vector<Json>{"x", "y", "y_velocity", "rotation", "is_dead", "mode"})},
+            {"integrity", matjson::makeObject({{"recording_complete", true}, {"dropped_records", 0}, {"errors", Json::array()}})},
+            {"attempt", matjson::makeObject({{"id", std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()) + "-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(++runId)}, {"start_kind", startKind},
+                {"input_source", active->replay ? "replay" : "unknown"}, {"replay_sha256", nullptr},
+                {"planned_inputs", Json::array()}, {"inputs", Json::array()}, {"trace", Json::array()}, {"terminal", nullptr}})},
+            {"limitations", Json(std::vector<Json>{"Selected state is not a complete resumable snapshot.",
+                "The processCommands call clock is not a demonstrated physics or hardware input clock.",
+                "Mod settings and all game configuration are not yet exhaustively captured.",
+                "No physical input provenance or human difficulty calibration is established."})}});
+        active->trace(0, false, false);
+        if (layer->m_isPlatformer) throw std::runtime_error("M1 supports classic levels only");
+        if (active->replay) {
+            if (std::string(startKind) != "level_start") throw std::runtime_error("Replay requires a true full start");
+            active->loadReplay(levelHash, envHash);
+        }
+        log::info("AXIOM local {} active; command-call clock, selected-state only", active->replay ? "replay" : "capture");
+        if (auto previous = layer->getChildByID("axiom-capture-indicator")) previous->removeFromParent();
+        auto indicator = CCLabelBMFont::create(active->replay ? "AXIOM REPLAY" : "AXIOM CAPTURE", "bigFont.fnt");
+        if (indicator) { indicator->setScale(0.25f); indicator->setPosition({80, 20}); indicator->setID("axiom-capture-indicator"); layer->addChild(indicator, 10000); }
+    } catch (std::exception const& error) { fail(error.what()); }
+}
+} // namespace axiom
+
+class $modify(AxiomPlayLayer, PlayLayer) {
+    bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
+        axiom::initializing = this; axiom::initCommandSeen = false;
+        auto result = PlayLayer::init(level, useReplay, dontCreateObjects);
+        axiom::initializing = nullptr;
+        if (result) axiom::begin(this, axiom::initCommandSeen || useReplay || dontCreateObjects);
+        return result;
+    }
+    void resetLevel() {
+        if (axiom::active && axiom::active->layer == this) axiom::stop("aborted", "PlayLayer::resetLevel");
+        axiom::resetting = this; axiom::resetCommandSeen = false;
+        PlayLayer::resetLevel();
+        axiom::resetting = nullptr;
+        if (axiom::initializing != this) {
+            if (axiom::active && axiom::active->inCommand) {
+                axiom::pendingStart = this;
+                // The enclosing command can continue updating after reset.
+                axiom::pendingStartUncertain = true;
+            } else axiom::begin(this, axiom::resetCommandSeen);
+        }
+    }
+    void destroyPlayer(PlayerObject* player, GameObject* object) {
+        PlayLayer::destroyPlayer(player, object);
+        if (axiom::active && axiom::active->layer == this && player && player->m_isDead)
+            axiom::stop("died", "PlayLayer::destroyPlayer");
+    }
+    void levelComplete() {
+        PlayLayer::levelComplete();
+        if (axiom::active && axiom::active->layer == this) axiom::stop("completed", "PlayLayer::levelComplete");
+    }
+    void pauseGame(bool unfocused) {
+        if (axiom::active && axiom::active->layer == this) axiom::stop("aborted", "PlayLayer::pauseGame");
+        PlayLayer::pauseGame(unfocused);
+    }
+    void onQuit() {
+        if (axiom::active && axiom::active->layer == this) axiom::stop("aborted", "PlayLayer::onQuit");
+        PlayLayer::onQuit();
+    }
+};
+class $modify(AxiomBaseLayer, GJBaseGameLayer) {
+    void handleButton(bool down, int button, bool isPlayer1) {
+        auto run = axiom::active.get();
+        if (run && run->layer == this && !run->terminal) {
+            if (run->replay && !run->injecting) { axiom::fail("Unexpected external requested input during replay"); return; }
+            try { run->input(button, isPlayer1 ? 1 : 2, down, "requested"); }
+            catch (std::exception const& error) { axiom::fail(error.what()); }
+        }
+        GJBaseGameLayer::handleButton(down, button, isPlayer1);
+    }
+    void processCommands(float dt, bool isHalfTick, bool isLastTick) {
+        if (axiom::initializing == this) axiom::initCommandSeen = true;
+        if (axiom::resetting == this) axiom::resetCommandSeen = true;
+        auto run = axiom::active.get();
+        if (!run || run->layer != this || run->terminal) { GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick); return; }
+        if ((run->replay && !axiom::option("replay-enabled", "replay")) ||
+            (!run->replay && !axiom::option("capture-enabled", "capture"))) {
+            axiom::stop("aborted", "AXIOM::disabled");
+            GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+            return;
+        }
+        run->inCommand = true;
+        ++run->command;
+        try {
+            if (run->command > axiom::MaxCommands) throw std::runtime_error("Command trace limit reached");
+            axiom::checked(dt);
+            if (dt < 0 || dt > 60) throw std::runtime_error("Command dt outside 0..60 seconds");
+            if (run->replay) {
+                while (run->next < run->planned.size() && run->planned[run->next].command == run->command) {
+                    auto event = run->planned[run->next++];
+                    run->injecting = true;
+                    this->handleButton(event.pressed, event.button, event.player == 1);
+                    run->injecting = false;
+                }
+            }
+        } catch (std::exception const& error) { axiom::fail(error.what()); }
+        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+        if (axiom::active.get() == run) {
+            try { run->trace(dt, isHalfTick, isLastTick); }
+            catch (std::exception const& error) { axiom::fail(error.what()); }
+            if (axiom::active.get() == run) { run->inCommand = false; axiom::exportRun(); }
+        }
+        if (static_cast<GJBaseGameLayer*>(axiom::pendingStart) == this) {
+            auto layer = axiom::pendingStart;
+            axiom::pendingStart = nullptr;
+            axiom::begin(layer, axiom::pendingStartUncertain);
+        }
+    }
+};
+class $modify(AxiomPlayer, PlayerObject) {
+    bool pushButton(PlayerButton button) {
+        auto result = PlayerObject::pushButton(button);
+        record(button, true, "push", result);
+        return result;
+    }
+    bool releaseButton(PlayerButton button) {
+        auto result = PlayerObject::releaseButton(button);
+        record(button, false, "release", result);
+        return result;
+    }
+    void record(PlayerButton button, bool pressed, char const* phase, bool result) {
+        auto run = axiom::active.get();
+        if (!run || run->terminal) return;
+        int player = this == run->layer->m_player1 ? 1 : this == run->layer->m_player2 ? 2 : 0;
+        if (!player) return;
+        try { run->input(static_cast<int>(button), player, pressed, phase, result); }
+        catch (std::exception const& error) { axiom::fail(error.what()); }
+    }
+};
+$on_mod(Loaded) {
+    log::info("AXIOM M1 adapter loaded; local capture/replay disabled by default; selected-state only; SDK {} bindings {}", AXIOM_SDK_COMMIT, AXIOM_BINDINGS_COMMIT);
+}

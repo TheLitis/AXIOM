@@ -1,0 +1,27 @@
+name: Native adapter build
+
+on:
+  push:
+    paths: ['native/**', 'scripts/build-native.ps1', '.github/workflows/native.yml']
+  pull_request:
+    paths: ['native/**', 'scripts/build-native.ps1', '.github/workflows/native.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build pinned Geode adapter without installing or launching the game
+        shell: pwsh
+        run: ./scripts/build-native.ps1 -Jobs 4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: axiom-native-windows-x64
+          path: native/build/axiom.native-capture.geode
+          if-no-files-found: error
+    # Compilation does not verify native loading, physics, replay or human difficulty.

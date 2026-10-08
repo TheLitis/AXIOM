@@ -1,0 +1,24 @@
+{
+    "geode": "5.8.2",
+    "gd": {"win": "2.2081"},
+    "id": "axiom.native-capture",
+    "version": "0.1.0",
+    "name": "AXIOM Native Capture",
+    "developer": "AXIOM contributors",
+    "description": "Opt-in local research capture of native gameplay callbacks and selected state.",
+    "early-load": true,
+    "settings": {
+        "capture-enabled": {
+            "name": "Enable local capture",
+            "description": "Records the next level start and resets locally. Capture stops on pause, death, finish or quit.",
+            "type": "bool",
+            "default": false
+        },
+        "replay-enabled": {
+            "name": "Enable AXIOM command replay",
+            "description": "Reads replay.json from this mod's save directory at a true full start. Uses the declared command-call clock and blocks other requested input.",
+            "type": "bool",
+            "default": false
+        }
+    }
+}

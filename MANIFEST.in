@@ -1,3 +1,6 @@
 include README.ru.md CONTRIBUTING.md AGENTS.md uv.lock
 recursive-include docs *.md *.csv
 recursive-include examples *.json *.txt
+recursive-include native *.cpp *.hpp *.json *.md CMakeLists.txt
+recursive-include scripts *.ps1
+prune native/build
