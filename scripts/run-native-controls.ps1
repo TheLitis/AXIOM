@@ -1,4 +1,7 @@
-param([Parameter(Mandatory = $true)][string]$GameDirectory)
+param(
+    [Parameter(Mandatory = $true)][string]$GameDirectory,
+    [ValidateSet('native', 'fixed-base-60', 'fixed-scheduler-240')][string]$ClockPolicy = 'native'
+)
 
 # Generated-fixture oracle controls; no human telemetry or AR.
 $ErrorActionPreference = 'Stop'
@@ -6,23 +9,19 @@ $workspace = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $workspace '.venv/Scripts/python.exe'
 if (-not (Test-Path -LiteralPath $python)) { throw 'Run uv sync --locked --extra dev first.' }
 if (Get-Process AXIOMSandbox -ErrorAction SilentlyContinue) { throw 'Existing sandbox process; finish that experiment first.' }
-& (Join-Path $PSScriptRoot 'prepare-native-sandbox.ps1') -GameDirectory $GameDirectory
 $runtime = Join-Path $workspace '.tools/runtime'
 $exe = Join-Path $runtime 'AXIOMSandbox.exe'
 $save = Join-Path $env:LOCALAPPDATA 'AXIOMSandbox/geode/mods/axiom.native-capture'
 $captures = Join-Path $save 'captures'
 $out = Join-Path $workspace ('reports/native/controls-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory $out | Out-Null
 $fixturePath = Join-Path $runtime 'fixture-level.txt'
-[byte[]]$oldFixture = [IO.File]::ReadAllBytes($fixturePath)
 $replayPath = Join-Path $save 'replay.json'
-$hadReplay = Test-Path -LiteralPath $replayPath
-[byte[]]$oldReplay = @()
-if ($hadReplay) { $oldReplay = [IO.File]::ReadAllBytes($replayPath) }
+. (Join-Path $PSScriptRoot 'native-experiment-state.ps1')
+$snapshot = Get-AxiomExperimentSnapshot $workspace
 function Run-Control([string]$Name, [bool]$Replay) {
     $before = @{}
     Get-ChildItem -LiteralPath $captures -File -Filter '*.json' | ForEach-Object { $before[$_.Name] = $true }
-    $arguments = @('--geode:axiom-sandbox')
+    $arguments = @('--geode:axiom-sandbox', "--geode:axiom.native-capture.clock-policy=$ClockPolicy")
     if ($Replay) { $arguments += '--geode:axiom.native-capture.replay' }
     $process = Start-Process -FilePath $exe -WorkingDirectory $runtime -ArgumentList $arguments -WindowStyle Hidden -PassThru
     $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -46,6 +45,9 @@ function Run-Control([string]$Name, [bool]$Replay) {
     }
 }
 try {
+    & (Join-Path $PSScriptRoot 'prepare-native-sandbox.ps1') -GameDirectory $GameDirectory
+    New-Item -ItemType Directory -Force $out, $save | Out-Null
+    [byte[]]$oldFixture = [IO.File]::ReadAllBytes($fixturePath)
     $hazard = 'kA13,0,kA15,0,kA16,0,kA14,0;1,8,2,300,3,15;1,1,2,600,3,-15;'
     [IO.File]::WriteAllText($fixturePath, $hazard, [Text.UTF8Encoding]::new($false))
     $death = Run-Control 'death' $false
@@ -69,9 +71,8 @@ try {
     $messages | ForEach-Object { Write-Output $_.ToString() }
     if ($validationExit -ne 2) { throw 'Incomplete/error control was not rejected by the inspector.' }
     Write-Output 'Wrong-level control: native mismatch error and inspector rejection confirmed.'
+    Write-Output "Clock policy: $ClockPolicy"
     Write-Output "Control evidence directory: $out"
 } finally {
-    [IO.File]::WriteAllBytes($fixturePath, $oldFixture)
-    if ($hadReplay) { [IO.File]::WriteAllBytes($replayPath, $oldReplay) }
-    elseif (Test-Path -LiteralPath $replayPath) { Remove-Item -LiteralPath $replayPath }
+    Restore-AxiomExperimentSnapshot $snapshot
 }
