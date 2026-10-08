@@ -76,6 +76,15 @@ vanilla or human delivery is unverified. Direct player push/release calls bypass
 this handler are not controlled. The plan and exact replay-file digest are
 retained; repeated trace/outcome checks cover only this declared policy.
 
+The scheduler calls the qualified native binding
+`GJBaseGameLayer::handleButton`, which enters Geode's registered handler before
+the one-shot permission is consumed. Calling the modified C++ wrapper directly
+can enter that wrapper twice and block the scheduled request before the original
+engine function runs. This is the same dispatch issue described in Geode's
+[modify tutorial](https://github.com/geode-sdk/docs/blob/main/tutorials/modify.md#accidentally-not-using-the-correct-function).
+Actual `PlayerObject` callbacks and a changed trajectory must be checked in the
+native fixture; recorded requested events alone do not establish input response.
+
 Terminal state is sampled after the original `levelComplete` or `destroyPlayer`
 callback. Death requires the player `m_isDead` field after that callback. A terminal
 inside a command call is exported only after the final post-command trace sample.

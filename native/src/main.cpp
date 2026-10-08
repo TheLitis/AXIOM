@@ -457,7 +457,11 @@ class $modify(AxiomBaseLayer, GJBaseGameLayer) {
                 while (run->next < run->planned.size() && run->planned[run->next].command == run->command) {
                     auto event = run->planned[run->next++];
                     run->injecting = true;
-                    this->handleButton(event.pressed, event.button, event.player == 1);
+                    // Enter through the native binding, so Geode establishes the
+                    // handleButton hook context before our one-shot permit is
+                    // consumed. Calling this->handleButton invokes the modified
+                    // wrapper directly; its base call then re-enters that hook.
+                    GJBaseGameLayer::handleButton(event.pressed, event.button, event.player == 1);
                     run->injecting = false;
                 }
             }

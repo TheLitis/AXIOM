@@ -16,6 +16,14 @@ function Assert-OrdinaryDirectory([string]$Path) {
         }
     }
 }
+function Assert-OrdinaryFile([string]$Path) {
+    if (Test-Path -LiteralPath $Path) {
+        $item = Get-Item -LiteralPath $Path -Force
+        if ($item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            throw "Sandbox file must not be a directory or reparse point: $Path"
+        }
+    }
+}
 Assert-OrdinaryDirectory (Join-Path $workspace '.tools')
 Assert-OrdinaryDirectory $runtimeDir
 Assert-OrdinaryDirectory (Join-Path $runtimeDir 'sandbox-saves')
@@ -26,6 +34,26 @@ Assert-OrdinaryDirectory $geodeSaveRoot
 Assert-OrdinaryDirectory (Join-Path $geodeSaveRoot 'geode')
 Assert-OrdinaryDirectory (Join-Path $geodeSaveRoot 'geode/mods')
 Assert-OrdinaryDirectory (Join-Path $geodeSaveRoot 'geode/mods/axiom.native-capture')
+Assert-OrdinaryDirectory (Join-Path $geodeSaveRoot 'geode/mods/axiom.native-capture/captures')
+Assert-OrdinaryDirectory (Join-Path $geodeSaveRoot 'geode/mods/geode.loader')
+Assert-OrdinaryFile (Join-Path $geodeSaveRoot 'geode/mods/axiom.native-capture/replay.json')
+Assert-OrdinaryFile (Join-Path $runtimeDir 'fixture-level.txt')
+if (Test-Path -LiteralPath (Join-Path $runtimeDir 'geode/update')) {
+    throw 'Pending sandbox loader update would change the pinned runtime; preserve it separately before testing.'
+}
+$loaderProfile = Join-Path $geodeSaveRoot 'geode/mods/geode.loader'
+New-Item -ItemType Directory -Force $loaderProfile | Out-Null
+$loaderSettingsPath = Join-Path $loaderProfile 'settings.json'
+Assert-OrdinaryFile $loaderSettingsPath
+$loaderSettings = @{}
+if (Test-Path -LiteralPath $loaderSettingsPath) {
+    $existingSettings = Get-Content -LiteralPath $loaderSettingsPath -Raw | ConvertFrom-Json
+    foreach ($property in $existingSettings.PSObject.Properties) {
+        $loaderSettings[$property.Name] = $property.Value
+    }
+}
+$loaderSettings['auto-check-updates'] = $false
+[System.IO.File]::WriteAllText($loaderSettingsPath, ($loaderSettings | ConvertTo-Json -Depth 20), [System.Text.UTF8Encoding]::new($false))
 $gameDir = (Resolve-Path -LiteralPath $GameDirectory).Path
 $gameExe = Join-Path $gameDir 'GeometryDash.exe'
 $expectedGameHash = 'fc5a16c292278bc2e8e078fb1d5023c2bd658322dd72712767ea70c2dd9ec6d0'

@@ -69,6 +69,9 @@ class $modify(AxiomSandboxMenu, MenuLayer) {
             return true;
         }
         Mod::get()->setSettingValue("capture-enabled", true);
+        // The isolated fixture's effective replay mode comes only from the launch
+        // flag, so a saved toggle cannot silently turn the baseline into replay.
+        Mod::get()->setSettingValue("replay-enabled", false);
         queueInMainThread([raw]() {
             auto level = GJGameLevel::create();
             level->m_levelName = "AXIOM instrument fixture";
