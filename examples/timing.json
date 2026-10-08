@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "kind": "timing_scenario",
+  "challenge": {
+    "id": "synthetic-obstacle-alpha",
+    "level_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "game_version": "synthetic-no-game-runtime",
+    "physics_version": "synthetic-no-physics-runtime",
+    "input_policy": "synthetic-single-button",
+    "environment_id": "synthetic-fixed-desktop"
+  },
+  "provenance": {
+    "origin": "synthetic",
+    "description": "Invented feasible regions illustrating route choice and joint constraints. Hash is a fixture label, not a real Geometry Dash level."
+  },
+  "noise": {"sigma_ms": 4, "shift_sigma_ms": 3, "drift_sigma_ms": 2, "rho": 0.8, "bias_ms": 0},
+  "routes": [
+    {
+      "id": "tight-intervals",
+      "label": "Coupled sequence",
+      "duration_seconds": 4,
+      "events": [
+        {"time_seconds": 0.5, "button": 1, "player": 1, "down": true, "windows_ms": [[-12, 12]]},
+        {"time_seconds": 0.8, "button": 1, "player": 1, "down": false, "windows_ms": [[-15, 10]]},
+        {"time_seconds": 1.2, "button": 1, "player": 1, "down": true, "windows_ms": [[-10, 14]]},
+        {"time_seconds": 1.6, "button": 1, "player": 1, "down": false, "windows_ms": [[-12, 12]]},
+        {"time_seconds": 2.1, "button": 1, "player": 1, "down": true, "windows_ms": [[-15, -3], [3, 15]]},
+        {"time_seconds": 2.5, "button": 1, "player": 1, "down": false, "windows_ms": [[-12, 12]]}
+      ],
+      "joint_constraints": [
+        {"terms": [[0, -1], [1, 1]], "lower_ms": -3, "upper_ms": 3},
+        {"terms": [[2, -1], [3, 1]], "lower_ms": -3, "upper_ms": 3},
+        {"terms": [[4, -1], [5, 1]], "lower_ms": -3, "upper_ms": 3}
+      ]
+    },
+    {
+      "id": "robust-alternative",
+      "label": "Alternative route",
+      "duration_seconds": 4,
+      "events": [
+        {"time_seconds": 0.5, "button": 1, "player": 1, "down": true, "windows_ms": [[-9, 9]]},
+        {"time_seconds": 0.8, "button": 1, "player": 1, "down": false, "windows_ms": [[-9, 9]]},
+        {"time_seconds": 1.2, "button": 1, "player": 1, "down": true, "windows_ms": [[-9, 9]]},
+        {"time_seconds": 1.6, "button": 1, "player": 1, "down": false, "windows_ms": [[-9, 9]]},
+        {"time_seconds": 2.1, "button": 1, "player": 1, "down": true, "windows_ms": [[-9, 9]]},
+        {"time_seconds": 2.5, "button": 1, "player": 1, "down": false, "windows_ms": [[-9, 9]]}
+      ],
+      "joint_constraints": []
+    }
+  ]
+}

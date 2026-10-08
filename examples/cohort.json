@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "cohort_id": "SYNTHETIC-DEMO-ONLY",
+  "synthetic": true,
+  "notes": "Entirely invented participant times, artifact hashes, environment and calibration. This is not a Geometry Dash measurement or a rating of a real level.",
+  "challenge": {
+    "id": "synthetic-obstacle-alpha",
+    "level_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "game_version": "synthetic-no-game-runtime",
+    "physics_version": "synthetic-no-physics-runtime",
+    "input_policy": "synthetic-single-button",
+    "environment_id": "synthetic-fixed-desktop"
+  },
+  "profile": {
+    "id": "synthetic-profile-1",
+    "skill_definition": "Invented fixed player skill profile; no measured human skills",
+    "sampling_method": "Invented independent participants; no real recruitment"
+  },
+  "population_id": "synthetic-population-1",
+  "protocol": {
+    "id": "synthetic-practice-1",
+    "version": "1",
+    "fixed": true,
+    "time_basis": "active_hours",
+    "practice_policy": "Invented time since first exposure includes active practice and attempts; excludes breaks",
+    "censoring_policy": "Invented administratively scheduled follow-up; independent censoring assumed"
+  },
+  "observations": [
+    {"participant_id": "synthetic-p01", "time_hours": 1.0, "completed": true},
+    {"participant_id": "synthetic-p02", "time_hours": 1.5, "completed": true},
+    {"participant_id": "synthetic-p03", "time_hours": 2.0, "completed": true},
+    {"participant_id": "synthetic-p04", "time_hours": 2.0, "completed": false, "censor_reason": "scheduled_follow_up_end"},
+    {"participant_id": "synthetic-p05", "time_hours": 2.5, "completed": true},
+    {"participant_id": "synthetic-p06", "time_hours": 3.0, "completed": true},
+    {"participant_id": "synthetic-p07", "time_hours": 4.0, "completed": true},
+    {"participant_id": "synthetic-p08", "time_hours": 5.0, "completed": true},
+    {"participant_id": "synthetic-p09", "time_hours": 6.0, "completed": true},
+    {"participant_id": "synthetic-p10", "time_hours": 7.0, "completed": false, "censor_reason": "scheduled_follow_up_end"}
+  ],
+  "reference": {
+    "id": "synthetic-calibration-1",
+    "version": "1",
+    "source_cohort_id": "SYNTHETIC-REFERENCE-ONLY",
+    "synthetic": true,
+    "challenge": {
+      "id": "synthetic-obstacle-reference",
+      "level_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "game_version": "synthetic-no-game-runtime",
+      "physics_version": "synthetic-no-physics-runtime",
+      "input_policy": "synthetic-single-button",
+      "environment_id": "synthetic-fixed-desktop"
+    },
+    "profile": {
+      "id": "synthetic-profile-1",
+      "skill_definition": "Invented fixed player skill profile; no measured human skills",
+      "sampling_method": "Invented independent participants; no real recruitment"
+    },
+    "population_id": "synthetic-population-1",
+    "protocol": {
+      "id": "synthetic-practice-1",
+      "version": "1",
+      "fixed": true,
+      "time_basis": "active_hours",
+      "practice_policy": "Invented time since first exposure includes active practice and attempts; excludes breaks",
+      "censoring_policy": "Invented administratively scheduled follow-up; independent censoring assumed"
+    },
+    "t50_hours": 2.0
+  }
+}

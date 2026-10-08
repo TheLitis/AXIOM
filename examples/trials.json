@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "oracle_trials",
+  "challenge": {
+    "id": "synthetic-oracle-v1",
+    "level_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "game_version": "synthetic-no-game",
+    "physics_version": "fixture-v1",
+    "input_policy": "continuous-offsets-ms",
+    "environment_id": "synthetic-lab-v1"
+  },
+  "provenance": {"origin": "synthetic", "description": "Invented trial ledger. No game was run."},
+  "engine_build": "synthetic-fixture-v1",
+  "initial_state_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "replay_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "event_count": 2,
+  "full_run": true,
+  "trials": [
+    {"id": "zero-1", "offsets_ms": [0, 0], "outcome": "completed", "elapsed_seconds": 2, "terminal_state_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
+    {"id": "zero-2", "offsets_ms": [0, 0], "outcome": "completed", "elapsed_seconds": 2, "terminal_state_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
+    {"id": "early", "offsets_ms": [-5, 0], "outcome": "died", "elapsed_seconds": 1, "terminal_state_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+    {"id": "unknown", "offsets_ms": [1, 0], "outcome": "error", "elapsed_seconds": 0}
+  ]
+}
