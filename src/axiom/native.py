@@ -475,6 +475,86 @@ def _blocked_signature(capture: dict) -> list[dict]:
     ]
 
 
+def _flat_player_fields(state: dict) -> dict:
+    """Expose each selected value independently, including player presence."""
+    fields = {}
+    for name in ("player1", "player2"):
+        player = state[name]
+        fields[f"{name}.present"] = player is not None
+        for key in sorted(PLAYER_FIELDS):
+            fields[f"{name}.{key}"] = None if player is None else player[key]
+    return fields
+
+
+def _trace_component_diagnostics(baseline: list[dict], compared: list[dict]) -> dict:
+    """Describe exact differences in one aligned component; no tolerance is used.
+
+    Lists are projections of the validated contiguous trace, so row positions
+    remain the original processCommands call indices, including initial row 0.
+    """
+    differing_common_records = 0
+    first_difference = None
+    field_differences = {}
+    for index, (left, right) in enumerate(zip(baseline, compared)):
+        if left == right:
+            continue
+        differing_common_records += 1
+        if first_difference is None:
+            first_difference = {"command_index": index, "baseline": left, "compared": right}
+        for key in left:
+            if left[key] == right[key]:
+                continue
+            if key not in field_differences:
+                field_differences[key] = {
+                    "differing_common_records": 0,
+                    "first_different_call_index": index,
+                    "baseline": left[key],
+                    "compared": right[key],
+                }
+            field_differences[key]["differing_common_records"] += 1
+    unmatched = abs(len(baseline) - len(compared))
+    if first_difference is None and unmatched:
+        index = min(len(baseline), len(compared))
+        first_difference = {
+            "command_index": index,
+            "baseline": baseline[index] if index < len(baseline) else None,
+            "compared": compared[index] if index < len(compared) else None,
+        }
+    return {
+        "equal": not differing_common_records and not unmatched,
+        "baseline_record_count": len(baseline),
+        "compared_record_count": len(compared),
+        "differing_common_records": differing_common_records,
+        "unmatched_record_count": unmatched,
+        "first_different_call_index": None if first_difference is None else first_difference["command_index"],
+        "first_difference": first_difference,
+        "field_differences": field_differences,
+    }
+
+
+def _terminal_component_diagnostics(baseline: dict, compared: dict) -> dict:
+    keys = ("outcome", "event", "command_index")
+    left_callback = {key: baseline[key] for key in keys}
+    right_callback = {key: compared[key] for key in keys}
+    left_fields = _flat_player_fields(baseline["state"])
+    right_fields = _flat_player_fields(compared["state"])
+    return {
+        "callback_and_placement_equal": left_callback == right_callback,
+        "selected_player_fields_equal": baseline["state"] == compared["state"],
+        "callback_and_placement_differences": {
+            key: {"baseline": left_callback[key], "compared": right_callback[key]}
+            for key in keys
+            if left_callback[key] != right_callback[key]
+        },
+        "selected_player_field_differences": {
+            key: {"baseline": left_fields[key], "compared": right_fields[key]}
+            for key in left_fields
+            if left_fields[key] != right_fields[key]
+        },
+        "wall_elapsed_seconds_compared": False,
+    }
+
+
 def _summary(capture: dict, source_sha256: str) -> dict:
     warnings = [
         "The supplied file's declared native origin is not authenticated or independently verified.",
@@ -592,6 +672,8 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
     base_blocked = _blocked_signature(base)
     base_plan = base["attempt"]["planned_inputs"]
     base_trace = base["attempt"]["trace"]
+    base_call_arguments = [{key: value for key, value in row.items() if key != "state"} for row in base_trace]
+    base_player_fields = [_flat_player_fields(row["state"]) for row in base_trace]
     base_terminal = {
         key: value for key, value in base["attempt"]["terminal"].items() if key != "wall_elapsed_seconds"
     }
@@ -613,6 +695,16 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
         planned_inputs_equal = capture["attempt"]["planned_inputs"] == base_plan
         capture_trace = capture["attempt"]["trace"]
         state_equal = capture_trace == base_trace
+        call_arguments = _trace_component_diagnostics(
+            base_call_arguments,
+            [{key: value for key, value in row.items() if key != "state"} for row in capture_trace],
+        )
+        player_fields = _trace_component_diagnostics(
+            base_player_fields, [_flat_player_fields(row["state"]) for row in capture_trace]
+        )
+        terminal_components = _terminal_component_diagnostics(
+            base["attempt"]["terminal"], capture["attempt"]["terminal"]
+        )
         terminal_equal = {
             key: value
             for key, value in capture["attempt"]["terminal"].items()
@@ -643,7 +735,14 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
                 },
                 "planned_inputs_equal": planned_inputs_equal,
                 "recorded_state_equal": state_equal,
+                "recorded_call_arguments_equal": call_arguments["equal"],
+                "recorded_player_fields_equal": player_fields["equal"],
+                "call_argument_diagnostics": call_arguments,
+                "player_field_diagnostics": player_fields,
                 "terminal_equal": terminal_equal,
+                "terminal_callback_and_placement_equal": terminal_components["callback_and_placement_equal"],
+                "terminal_player_fields_equal": terminal_components["selected_player_fields_equal"],
+                "terminal_diagnostics": terminal_components,
                 "first_different_state_call_index": first_state_difference,
                 "consistent": planned_inputs_equal and inputs_equal and state_equal and terminal_equal,
             }
@@ -654,6 +753,17 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
         "kind": "native_capture_comparison",
         "status": "recorded_subset_consistent" if consistent else "recorded_subset_inconsistent",
         "comparison_rule": "exact_recorded_call_arguments_player_fields_inputs_and_terminal",
+        "component_consistency": {
+            key: all(row[key] for row in comparisons)
+            for key in (
+                "planned_inputs_equal",
+                "recorded_inputs_equal",
+                "recorded_call_arguments_equal",
+                "recorded_player_fields_equal",
+                "terminal_callback_and_placement_equal",
+                "terminal_player_fields_equal",
+            )
+        },
         "authentication_status": "not_authenticated",
         "physics_status": "not_independently_verified",
         "m1_gate": "not_established_by_file_inspection",
@@ -687,6 +797,7 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
             "Matching supplied files do not authenticate their origin or prove independent native execution.",
             "Agreement concerns only selected recorded fields, not full engine determinism or restoration.",
             "Wall timestamps are excluded; reported dt/call sequence and terminal placement are compared exactly.",
+            "Call arguments, selected player fields and terminal callback/state are reported separately; all must match exactly, including rotation, for subset consistency.",
             "Blocked unknown-origin requests were not forwarded and are diagnostic only; differences do not affect delivered subset consistency.",
             "The effect of suppressed requests on a counterfactual unsuppressed trajectory is not measured; vanilla-input equivalence is unsupported.",
             "Direct PlayerObject push/release calls bypassing handleButton are outside replay channel control.",

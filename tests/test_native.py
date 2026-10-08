@@ -422,17 +422,21 @@ def test_actual_collector_contract_additions_validated(tmp_path, change):
 
 
 def test_cli_native_and_comparison_roundtrip(tmp_path, capsys):
-    first = save(tmp_path, capture(), "first.json")
+    first_document = capture()
+    first_document["attempt"]["blocked_inputs"] = [blocked_input()]
+    first = save(tmp_path, first_document, "first.json")
     second = save(tmp_path, capture(attempt_id="other"), "second.json")
     assert main(["native", str(first)]) == 0
     inspected = json.loads(capsys.readouterr().out)
     assert inspected["kind"] == "native_capture_inspection"
     assert inspected["authentication_status"] == "not_authenticated"
+    assert inspected["blocked_input_diagnostics"]["records"][0]["source"] == "unknown"
     output = tmp_path / "comparison.json"
     assert main(["native-compare", str(first), str(second), "--json", str(output)]) == 0
     compared = json.loads(output.read_text(encoding="utf-8"))
     assert compared["status"] == "recorded_subset_consistent"
     assert compared["m1_gate"] == "not_established_by_file_inspection"
+    assert compared["blocked_input_diagnostics"]["status"] == "diagnostic_records_different"
 
 
 def test_cli_comparison_rejects_single_file_and_bad_capture(tmp_path, capsys):
@@ -593,3 +597,109 @@ def test_old_input_policy_cannot_be_mislabeled_as_owned_channel_capture(tmp_path
     refresh_environment(data)
     with pytest.raises(ValueError, match="owned-input"):
         inspect(tmp_path, data)
+
+
+@pytest.mark.parametrize(
+    "field,value", [("dt_seconds", 1 / 120), ("is_half_tick", True), ("is_last_tick", False)]
+)
+def test_command_arguments_are_distinct_from_matching_player_fields(tmp_path, field, value):
+    first = capture()
+    second = capture(attempt_id="other")
+    second["attempt"]["trace"][1][field] = value
+    report = compare(tmp_path, first, second)
+    row = report["comparisons"][0]
+    assert report["status"] == "recorded_subset_inconsistent"
+    assert row["recorded_state_equal"] is False
+    assert row["recorded_call_arguments_equal"] is False
+    assert row["recorded_player_fields_equal"] is True
+    assert row["terminal_callback_and_placement_equal"] is True
+    assert row["terminal_player_fields_equal"] is True
+    diagnostic = row["call_argument_diagnostics"]
+    assert diagnostic["differing_common_records"] == 1
+    assert diagnostic["unmatched_record_count"] == 0
+    assert diagnostic["first_different_call_index"] == 1
+    assert diagnostic["field_differences"][field]["compared"] == value
+    assert row["player_field_diagnostics"]["first_difference"] is None
+    assert report["component_consistency"]["recorded_call_arguments_equal"] is False
+    assert report["component_consistency"]["recorded_player_fields_equal"] is True
+
+
+def test_rotation_is_a_strict_player_field_with_separate_exact_diagnostics(tmp_path):
+    first = capture()
+    second = capture(attempt_id="other")
+    second["attempt"]["trace"][1]["state"]["player1"]["rotation"] = 1e-12
+    second["attempt"]["trace"][2]["state"]["player1"]["rotation"] = 2e-12
+    report = compare(tmp_path, first, second)
+    row = report["comparisons"][0]
+    assert report["status"] == "recorded_subset_inconsistent"
+    assert row["recorded_call_arguments_equal"] is True
+    assert row["recorded_player_fields_equal"] is False
+    assert row["terminal_equal"] is True
+    diagnostic = row["player_field_diagnostics"]
+    assert diagnostic["differing_common_records"] == 2
+    assert diagnostic["first_different_call_index"] == 1
+    assert diagnostic["field_differences"] == {
+        "player1.rotation": {
+            "differing_common_records": 2,
+            "first_different_call_index": 1,
+            "baseline": 0.0,
+            "compared": 1e-12,
+        }
+    }
+
+
+def test_terminal_rotation_difference_cannot_be_hidden_by_matching_completion(tmp_path):
+    first = capture()
+    second = capture(attempt_id="other")
+    second["attempt"]["terminal"]["state"]["player1"]["rotation"] = 1
+    report = compare(tmp_path, first, second)
+    row = report["comparisons"][0]
+    assert report["status"] == "recorded_subset_inconsistent"
+    assert row["recorded_state_equal"] is True
+    assert row["terminal_equal"] is False
+    assert row["terminal_callback_and_placement_equal"] is True
+    assert row["terminal_player_fields_equal"] is False
+    assert row["terminal_diagnostics"]["callback_and_placement_differences"] == {}
+    assert row["terminal_diagnostics"]["selected_player_field_differences"] == {
+        "player1.rotation": {"baseline": 0.0, "compared": 1}
+    }
+    assert report["component_consistency"]["terminal_player_fields_equal"] is False
+
+
+def test_player_presence_and_missing_trace_tail_are_reported_explicitly(tmp_path):
+    first = capture()
+    second = capture(attempt_id="other")
+    second["attempt"]["trace"][1]["state"]["player2"] = player()
+    report = compare(tmp_path, first, second)
+    diagnostic = report["comparisons"][0]["player_field_diagnostics"]
+    assert diagnostic["field_differences"]["player2.present"]["baseline"] is False
+    assert diagnostic["field_differences"]["player2.present"]["compared"] is True
+    second = capture(attempt_id="other")
+    second["attempt"]["trace"].pop()
+    second["attempt"]["terminal"]["command_index"] = 1
+    report = compare(tmp_path, first, second)
+    row = report["comparisons"][0]
+    assert row["call_argument_diagnostics"]["differing_common_records"] == 0
+    assert row["call_argument_diagnostics"]["unmatched_record_count"] == 1
+    assert row["call_argument_diagnostics"]["first_different_call_index"] == 2
+    assert row["call_argument_diagnostics"]["first_difference"]["compared"] is None
+    assert row["player_field_diagnostics"]["unmatched_record_count"] == 1
+    assert row["terminal_callback_and_placement_equal"] is False
+    assert row["terminal_player_fields_equal"] is True
+    assert row["terminal_diagnostics"]["callback_and_placement_differences"] == {
+        "command_index": {"baseline": 2, "compared": 1}
+    }
+
+
+def test_native_input_return_difference_still_fails_when_other_components_match(tmp_path):
+    first = capture()
+    second = capture(attempt_id="other")
+    second["attempt"]["inputs"][1]["native_return"] = False
+    report = compare(tmp_path, first, second)
+    row = report["comparisons"][0]
+    assert row["recorded_inputs_equal"] is False
+    assert row["recorded_call_arguments_equal"] is True
+    assert row["recorded_player_fields_equal"] is True
+    assert row["terminal_callback_and_placement_equal"] is True
+    assert row["terminal_player_fields_equal"] is True
+    assert row["consistent"] is False
