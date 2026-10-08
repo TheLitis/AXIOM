@@ -1,0 +1,20 @@
+{
+  "version": 1.0,
+  "gameVersion": 2.204,
+  "description": "Synthetic GDR 1 JSON format fixture. No real level, human performance, or successful completion is claimed.",
+  "duration": 1.0,
+  "bot": {"name": "AXIOM synthetic fixture", "version": "0.1"},
+  "level": {"id": 0, "name": "Synthetic import example"},
+  "author": "AXIOM contributors",
+  "seed": 0,
+  "coins": 0,
+  "ldm": false,
+  "framerate": 240.0,
+  "axiom_fixture": true,
+  "inputs": [
+    {"frame": 0, "btn": 1, "2p": false, "down": true},
+    {"frame": 12, "btn": 1, "2p": false, "down": false},
+    {"frame": 24, "btn": 1, "2p": true, "down": true},
+    {"frame": 36, "btn": 1, "2p": true, "down": false}
+  ]
+}

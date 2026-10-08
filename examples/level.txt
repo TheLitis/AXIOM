@@ -1,0 +1,1 @@
+kS38,synthetic_fixture,kA13,0;1,1,2,30,3,15;1,8,2,60,3,15;1,12,2,90,3,30,9999,unknown-property;
