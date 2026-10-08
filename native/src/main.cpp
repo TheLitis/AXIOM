@@ -29,6 +29,7 @@ std::string clockSelectionError;
 size_t updateDepth = 0;
 size_t schedulerDepth = 0;
 size_t phaseDepth = 0;
+size_t commandDepth = 0;
 std::filesystem::path executablePath();
 
 void selectClockPolicy() {
@@ -248,6 +249,7 @@ struct Run {
     bool injecting = false;
     bool replay = false;
     bool terminal = false;
+    bool terminalSnapshotReady = false;
     bool complete = true;
     Clock::time_point start = Clock::now();
     std::vector<size_t> updates;
@@ -342,6 +344,7 @@ struct Run {
             {"command_index", command}, {"wall_elapsed_seconds", std::chrono::duration<double>(Clock::now() - start).count()},
             {"state", state(layer)}, {"phase", phase(layer)}, {"update_sequence", membership(updates)},
             {"scheduler_sequence", membership(schedulers)}});
+        terminalSnapshotReady = true;
     }
     void loadReplay(std::string const& levelHash, std::string const& envHash) {
         std::ifstream stream(Mod::get()->getSaveDir() / "replay.json", std::ios::binary);
@@ -381,15 +384,36 @@ GJBaseGameLayer* initializing = nullptr;
 bool initCommandSeen = false;
 GJBaseGameLayer* resetting = nullptr;
 bool resetCommandSeen = false;
-PlayLayer* pendingStart = nullptr;
+struct ReleaseLayer {
+    void operator()(PlayLayer* layer) const { if (layer) layer->release(); }
+};
+std::unique_ptr<PlayLayer, ReleaseLayer> pendingStart;
 bool pendingStartUncertain = false;
 uint64_t runId = 0;
 bool option(char const* setting, char const* flag) { return Mod::get()->getSettingValue<bool>(setting) || Mod::get()->getLaunchFlag(flag); }
+void queueStart(PlayLayer* layer, bool uncertain) {
+    // Acquire the new reference before releasing the old one, including when
+    // a nested reset replaces a pending start with the same layer.
+    layer->retain();
+    pendingStart.reset(layer);
+    pendingStartUncertain = uncertain;
+}
+std::unique_ptr<PlayLayer, ReleaseLayer> cancelPendingStart(PlayLayer* layer) {
+    if (pendingStart.get() == layer) {
+        pendingStartUncertain = false;
+        return std::move(pendingStart);
+    }
+    return {};
+}
 
 void exportRun() {
-    if (!active || !active->terminal || active->inCommand || updateDepth || schedulerDepth || phaseDepth) return;
+    if (!active || !active->terminal || active->inCommand || commandDepth || updateDepth || schedulerDepth || phaseDepth) return;
     auto run = std::move(active);
     if (auto indicator = run->layer->getChildByID("axiom-capture-indicator")) indicator->removeFromParent();
+    if (!run->terminalSnapshotReady) {
+        log::error("AXIOM capture discarded after callbacks closed; terminal snapshot unavailable; no artifact");
+        return;
+    }
     run->document["integrity"]["recording_complete"] = run->complete;
     run->document["integrity"]["dropped_records"] = run->dropped;
     try {
@@ -413,7 +437,12 @@ void fail(std::string const& message) {
     if (!active) return;
     active->error(message);
     try { active->finish("error", "AXIOM::error"); }
-    catch (...) { active.reset(); return; }
+    catch (...) {
+        // Nested hooks can still hold Run*. Keep both Run and its retained layer
+        // alive until the enclosing command/update/scheduler/phase returns.
+        // exportRun will discard this attempt without a fabricated snapshot.
+        active->terminal = true;
+    }
     exportRun();
 }
 void stop(char const* outcome, char const* event) {
@@ -421,10 +450,9 @@ void stop(char const* outcome, char const* event) {
     try { active->finish(outcome, event); exportRun(); } catch (std::exception const& error) { fail(error.what()); }
 }
 void begin(PlayLayer* layer, bool uncertainStart = false) {
-    if (active && (active->inCommand || updateDepth || schedulerDepth || phaseDepth)) {
+    if (active && (active->inCommand || commandDepth || updateDepth || schedulerDepth || phaseDepth)) {
         stop("aborted", "PlayLayer::resetLevel");
-        pendingStart = layer;
-        pendingStartUncertain = true;
+        queueStart(layer, true);
         return;
     }
     if (active) stop("aborted", "PlayLayer::resetLevel");
@@ -481,13 +509,22 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
 }
 void flushPending() {
     exportRun();
-    if (pendingStart && !updateDepth && !schedulerDepth && !phaseDepth && (!active || !active->inCommand)) {
-        auto layer = pendingStart;
+    if (pendingStart && !commandDepth && !updateDepth && !schedulerDepth && !phaseDepth && (!active || !active->inCommand)) {
+        auto layer = std::move(pendingStart);
         auto uncertain = pendingStartUncertain;
-        pendingStart = nullptr;
-        begin(layer, uncertain);
+        pendingStartUncertain = false;
+        // Ownership spans exportRun's release of the old Run and all of begin,
+        // including disabled/error exits. A new Run acquires its own reference.
+        begin(layer.get(), uncertain);
     }
 }
+struct CommandScope {
+    CommandScope() { ++commandDepth; }
+    ~CommandScope() {
+        --commandDepth;
+        flushPending();
+    }
+};
 } // namespace axiom
 
 class $modify(AxiomPlayLayer, PlayLayer) {
@@ -504,10 +541,9 @@ class $modify(AxiomPlayLayer, PlayLayer) {
         PlayLayer::resetLevel();
         axiom::resetting = nullptr;
         if (axiom::initializing != this) {
-            if (axiom::active && (axiom::active->inCommand || axiom::updateDepth || axiom::schedulerDepth || axiom::phaseDepth)) {
-                axiom::pendingStart = this;
+            if (axiom::active && (axiom::active->inCommand || axiom::commandDepth || axiom::updateDepth || axiom::schedulerDepth || axiom::phaseDepth)) {
                 // The enclosing command can continue updating after reset.
-                axiom::pendingStartUncertain = true;
+                axiom::queueStart(this, true);
             } else axiom::begin(this, axiom::resetCommandSeen);
         }
     }
@@ -537,10 +573,12 @@ class $modify(AxiomPlayLayer, PlayLayer) {
         if (axiom::active && axiom::active->layer == this) axiom::stop("completed", "PlayLayer::levelComplete");
     }
     void pauseGame(bool unfocused) {
+        auto cancelledStart = axiom::cancelPendingStart(this);
         if (axiom::active && axiom::active->layer == this) axiom::stop("aborted", "PlayLayer::pauseGame");
         PlayLayer::pauseGame(unfocused);
     }
     void onQuit() {
+        auto cancelledStart = axiom::cancelPendingStart(this);
         if (axiom::active && axiom::active->layer == this) axiom::stop("aborted", "PlayLayer::onQuit");
         PlayLayer::onQuit();
     }
@@ -591,10 +629,19 @@ class $modify(AxiomBaseLayer, GJBaseGameLayer) {
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
     void processCommands(float dt, bool isHalfTick, bool isLastTick) {
+        axiom::CommandScope commandScope;
         if (axiom::initializing == this) axiom::initCommandSeen = true;
         if (axiom::resetting == this) axiom::resetCommandSeen = true;
         auto run = axiom::active.get();
         if (!run || run->layer != this || run->terminal) { GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick); return; }
+        if (run->inCommand) {
+            // One contiguous post-call trace cannot describe re-entrant command
+            // entries. Keep the engine call, but reject this capture and retain
+            // Run until every enclosing command callback has actually returned.
+            axiom::fail("Re-entrant processCommands is unsupported by the capture clock");
+            GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+            return;
+        }
         if ((run->replay && !axiom::option("replay-enabled", "replay")) ||
             (!run->replay && !axiom::option("capture-enabled", "capture"))) {
             axiom::stop("aborted", "AXIOM::disabled");
@@ -608,7 +655,7 @@ class $modify(AxiomBaseLayer, GJBaseGameLayer) {
             axiom::checked(dt);
             if (dt < 0 || dt > 60) throw std::runtime_error("Command dt outside 0..60 seconds");
             if (run->replay) {
-                while (run->next < run->planned.size() && run->planned[run->next].command == run->command) {
+                while (!run->terminal && run->next < run->planned.size() && run->planned[run->next].command == run->command) {
                     auto event = run->planned[run->next++];
                     run->injecting = true;
                     // Enter through the native binding, so Geode establishes the
