@@ -2,6 +2,7 @@
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/PlayerObject.hpp>
+#include <Geode/modify/CCScheduler.hpp>
 #include <Windows.h>
 #include <bcrypt.h>
 #include <algorithm>
@@ -22,6 +23,30 @@ constexpr size_t MaxBytes = 16 * 1024 * 1024;
 constexpr size_t MaxCommands = 20000;
 constexpr size_t MaxInputs = 12000;
 constexpr char Policy[] = "process-commands-pre-hook-owned-input-v1";
+enum class ClockPolicy { Native, FixedBase60, FixedScheduler240 };
+ClockPolicy clockPolicy = ClockPolicy::Native;
+std::string clockSelectionError;
+size_t updateDepth = 0;
+size_t schedulerDepth = 0;
+size_t phaseDepth = 0;
+std::filesystem::path executablePath();
+
+void selectClockPolicy() {
+    auto choice = Mod::get()->getLaunchArgument("clock-policy").value_or("native");
+    if (choice == "native") return;
+    if (choice != "fixed-base-60" && choice != "fixed-scheduler-240") {
+        clockSelectionError = "Unsupported clock-policy launch argument";
+        return;
+    }
+    // Clock interventions are an explicitly selected isolated-process experiment.
+    // They never activate in the ordinary game, even if settings enable capture.
+    if (_wcsicmp(executablePath().filename().c_str(), L"AXIOMSandbox.exe") != 0 ||
+            !Loader::get()->getLaunchFlag("axiom-sandbox")) {
+        clockSelectionError = "Fixed clock requires AXIOMSandbox.exe and axiom-sandbox launch guard";
+        return;
+    }
+    clockPolicy = choice == "fixed-base-60" ? ClockPolicy::FixedBase60 : ClockPolicy::FixedScheduler240;
+}
 
 // Environment documents contain no floating point values. Sorting keys recursively
 // matches Python's compact, sorted, ensure_ascii=False JSON for these documents.
@@ -99,6 +124,7 @@ std::filesystem::path executablePath() {
     return std::filesystem::path(std::wstring(buffer.data(), length));
 }
 Json environment() {
+    if (!clockSelectionError.empty()) throw std::runtime_error(clockSelectionError);
     std::vector<Mod*> mods;
     for (auto mod : Loader::get()->getAllMods()) if (mod->isLoaded()) mods.push_back(mod);
     std::sort(mods.begin(), mods.end(), [](auto a, auto b) { return std::string(a->getID()) < std::string(b->getID()); });
@@ -117,7 +143,14 @@ Json environment() {
         {"platform", "windows-x64"}, {"mods", manifest}, {"configuration_complete", false},
         {"input_policy", Policy}, {"clocks", matjson::makeObject({
             {"unit", "processCommands_call_index"}, {"dt_unit", "seconds_as_passed_to_hook"},
-            {"hardware_arrival", "unknown"}, {"render_cadence", "not_captured"}})}});
+            {"hardware_arrival", "unknown"}, {"render_cadence", "not_captured"},
+            {"clock_policy", clockPolicy == ClockPolicy::Native ? "native" : clockPolicy == ClockPolicy::FixedBase60 ? "fixed-base-60" : "fixed-scheduler-240"},
+            {"intervention_hook", clockPolicy == ClockPolicy::Native ? "none" : clockPolicy == ClockPolicy::FixedBase60 ? "GJBaseGameLayer::update" : "CCScheduler::update"},
+            {"step_numerator", clockPolicy == ClockPolicy::Native ? 0 : 1},
+            {"step_denominator", clockPolicy == ClockPolicy::FixedBase60 ? 60 : clockPolicy == ClockPolicy::FixedScheduler240 ? 240 : 1},
+            {"intervention_scope", "guarded-sandbox-process"},
+            {"update_unit", "GJBaseGameLayer::update_call_index"},
+            {"scheduler_unit", "CCScheduler::update_call_index"}})}});
 }
 double checked(double value) {
     if (!std::isfinite(value)) throw std::runtime_error("Nonfinite selected engine state");
@@ -135,6 +168,16 @@ Json playerState(PlayerObject* player) {
 }
 Json state(GJBaseGameLayer* layer) {
     return matjson::makeObject({{"player1", playerState(layer->m_player1)}, {"player2", playerState(layer->m_player2)}});
+}
+Json phase(GJBaseGameLayer* layer) {
+    // Runs are owned only by PlayLayer. These are raw fields, not a gameplay/
+    // collision or animation-completion classification inferred from position.
+    auto play = static_cast<PlayLayer*>(layer);
+    return matjson::makeObject({{"level_end_animation_started", layer->m_levelEndAnimationStarted},
+        {"has_completed_level", play->m_hasCompletedLevel}});
+}
+Json membership(std::vector<size_t> const& stack) {
+    return stack.empty() ? Json(nullptr) : Json(static_cast<uint64_t>(stack.back()));
 }
 struct ReplayEvent { uint64_t command; int player; int button; bool pressed; };
 uint64_t integer(Json const& value, uint64_t minimum, uint64_t maximum) {
@@ -207,18 +250,67 @@ struct Run {
     bool terminal = false;
     bool complete = true;
     Clock::time_point start = Clock::now();
+    std::vector<size_t> updates;
+    std::vector<size_t> schedulers;
     std::vector<ReplayEvent> planned;
     size_t next = 0;
-    explicit Run(GJBaseGameLayer* owner) : layer(owner) {}
+    explicit Run(GJBaseGameLayer* owner) : layer(owner) { layer->retain(); }
+    ~Run() { layer->release(); }
     Json& attempt() { return document["attempt"]; }
     void error(std::string const& message) {
         complete = false;
         document["integrity"]["errors"].push(message);
     }
+    int64_t wallTime() const {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
+    }
+    size_t enterUpdate(char const* stream, float original, float delivered, std::vector<size_t>& stack) {
+        checked(original); checked(delivered);
+        if (original < 0 || original > 60 || delivered < 0 || delivered > 60)
+            throw std::runtime_error("Update dt outside 0..60 seconds");
+        auto& records = attempt()[stream];
+        if (records.size() >= MaxCommands) { ++dropped; throw std::runtime_error("Update trace limit reached"); }
+        auto index = records.size();
+        auto record = matjson::makeObject({{"sequence", static_cast<uint64_t>(index)},
+            {"parent_sequence", membership(stack)}, {"original_dt_seconds", checked(original)},
+            {"delivered_dt_seconds", checked(delivered)}, {"command_index_before", command},
+            {"command_index_after", nullptr}, {"phase_before", phase(layer)}, {"phase_after", nullptr},
+            {"wall_enter_ns", wallTime()}, {"wall_exit_ns", nullptr}});
+        if (std::string_view(stream) == "updates") record["scheduler_sequence"] = membership(schedulers);
+        records.push(record);
+        stack.push_back(index);
+        return index;
+    }
+    void exitUpdate(char const* stream, size_t index, std::vector<size_t>& stack) {
+        auto& record = attempt()[stream][index];
+        record["command_index_after"] = command;
+        record["phase_after"] = phase(layer);
+        record["wall_exit_ns"] = wallTime();
+        if (stack.empty() || stack.back() != index) throw std::runtime_error("Update nesting mismatch");
+        stack.pop_back();
+    }
+    size_t enterPhaseEvent() {
+        auto& records = attempt()["phase_events"];
+        if (records.size() >= 256) { ++dropped; throw std::runtime_error("Finish phase event limit reached"); }
+        auto index = records.size();
+        records.push(matjson::makeObject({{"sequence", static_cast<uint64_t>(index)},
+            {"event", "PlayLayer::playEndAnimationToPos"}, {"command_index", command},
+            {"update_sequence", membership(updates)}, {"scheduler_sequence", membership(schedulers)},
+            {"phase_before", phase(layer)}, {"phase_after", nullptr},
+            {"wall_enter_ns", wallTime()}, {"wall_exit_ns", nullptr}}));
+        return index;
+    }
+    void exitPhaseEvent(size_t index) {
+        auto& record = attempt()["phase_events"][index];
+        record["phase_after"] = phase(layer);
+        record["wall_exit_ns"] = wallTime();
+    }
     void trace(float dt, bool half, bool last) {
         if (attempt()["trace"].size() >= MaxCommands + 1) { ++dropped; throw std::runtime_error("Command trace limit reached"); }
         attempt()["trace"].push(matjson::makeObject({{"command_index", command}, {"dt_seconds", checked(dt)},
-            {"is_half_tick", half}, {"is_last_tick", last}, {"state", state(layer)}}));
+            {"is_half_tick", half}, {"is_last_tick", last}, {"state", state(layer)},
+            {"phase", phase(layer)}, {"update_sequence", membership(updates)},
+            {"scheduler_sequence", membership(schedulers)}}));
     }
     void input(int button, int player, bool pressed, char const* phase, Json returned = nullptr) {
         if (terminal) return;
@@ -248,7 +340,8 @@ struct Run {
         terminal = true;
         attempt()["terminal"] = matjson::makeObject({{"outcome", outcome}, {"event", event},
             {"command_index", command}, {"wall_elapsed_seconds", std::chrono::duration<double>(Clock::now() - start).count()},
-            {"state", state(layer)}});
+            {"state", state(layer)}, {"phase", phase(layer)}, {"update_sequence", membership(updates)},
+            {"scheduler_sequence", membership(schedulers)}});
     }
     void loadReplay(std::string const& levelHash, std::string const& envHash) {
         std::ifstream stream(Mod::get()->getSaveDir() / "replay.json", std::ios::binary);
@@ -294,7 +387,7 @@ uint64_t runId = 0;
 bool option(char const* setting, char const* flag) { return Mod::get()->getSettingValue<bool>(setting) || Mod::get()->getLaunchFlag(flag); }
 
 void exportRun() {
-    if (!active || !active->terminal || active->inCommand) return;
+    if (!active || !active->terminal || active->inCommand || updateDepth || schedulerDepth || phaseDepth) return;
     auto run = std::move(active);
     if (auto indicator = run->layer->getChildByID("axiom-capture-indicator")) indicator->removeFromParent();
     run->document["integrity"]["recording_complete"] = run->complete;
@@ -328,6 +421,12 @@ void stop(char const* outcome, char const* event) {
     try { active->finish(outcome, event); exportRun(); } catch (std::exception const& error) { fail(error.what()); }
 }
 void begin(PlayLayer* layer, bool uncertainStart = false) {
+    if (active && (active->inCommand || updateDepth || schedulerDepth || phaseDepth)) {
+        stop("aborted", "PlayLayer::resetLevel");
+        pendingStart = layer;
+        pendingStartUncertain = true;
+        return;
+    }
     if (active) stop("aborted", "PlayLayer::resetLevel");
     if (!option("capture-enabled", "capture") && !option("replay-enabled", "replay")) return;
     if (Loader::get()->getVersion() != VersionInfo(5, 8, 2)) { log::error("AXIOM capture requires Geode 5.8.2"); return; }
@@ -341,7 +440,7 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
         active = std::make_unique<Run>(layer);
         active->replay = option("replay-enabled", "replay");
         active->document = matjson::makeObject({
-            {"schema_version", 1}, {"kind", "native_capture"},
+            {"schema_version", 2}, {"kind", "native_capture"},
             {"provenance", matjson::makeObject({{"origin", "native-engine-capture"}, {"independently_verified", false}, {"state_completeness", "selected_fields_only"}})},
             {"collector", matjson::makeObject({{"id", "axiom.native-capture"}, {"version", "0.1.0"},
                 {"source_commit", AXIOM_SOURCE_COMMIT}, {"source_tree_sha256", AXIOM_SOURCE_TREE_SHA256},
@@ -356,13 +455,18 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
                 std::chrono::system_clock::now().time_since_epoch()).count()) + "-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(++runId)}, {"start_kind", startKind},
                 {"input_source", active->replay ? "replay" : "unknown"}, {"replay_sha256", nullptr},
                 {"planned_inputs", Json::array()}, {"inputs", Json::array()}, {"blocked_inputs", Json::array()},
-                {"trace", Json::array()}, {"terminal", nullptr}})},
+                {"trace", Json::array()}, {"updates", Json::array()}, {"scheduler_updates", Json::array()},
+                {"phase_events", Json::array()}, {"terminal", nullptr}})},
             {"limitations", Json(std::vector<Json>{"Selected state is not a complete resumable snapshot.",
                 "The processCommands call clock is not a demonstrated physics or hardware input clock.",
                 "Mod settings and all game configuration are not yet exhaustively captured.",
                 "No physical input provenance or human difficulty calibration is established.",
                 "Replay suppresses non-injector handleButton requests of unknown origin and retains blocked_inputs diagnostics.",
-                "Direct PlayerObject push/release calls bypassing handleButton are not controlled by replay channel ownership."})}});
+                "Direct PlayerObject push/release calls bypassing handleButton are not controlled by replay channel ownership.",
+                "The update and scheduler hooks are not render callbacks or a complete engine clock.",
+                "A callback already running at capture start has no invented paired row; its membership is null.",
+                "Fixed clocks are isolated-process interventions; equivalence to ordinary gameplay is unverified.",
+                "Original update dt and wall timing are cadence diagnostics; delivered dt and call grouping are retained."})}});
         active->trace(0, false, false);
         if (layer->m_isPlatformer) throw std::runtime_error("M1 supports classic levels only");
         if (active->replay) {
@@ -374,6 +478,15 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
         auto indicator = CCLabelBMFont::create(active->replay ? "AXIOM REPLAY" : "AXIOM CAPTURE", "bigFont.fnt");
         if (indicator) { indicator->setScale(0.25f); indicator->setPosition({80, 20}); indicator->setID("axiom-capture-indicator"); layer->addChild(indicator, 10000); }
     } catch (std::exception const& error) { fail(error.what()); }
+}
+void flushPending() {
+    exportRun();
+    if (pendingStart && !updateDepth && !schedulerDepth && !phaseDepth && (!active || !active->inCommand)) {
+        auto layer = pendingStart;
+        auto uncertain = pendingStartUncertain;
+        pendingStart = nullptr;
+        begin(layer, uncertain);
+    }
 }
 } // namespace axiom
 
@@ -391,12 +504,28 @@ class $modify(AxiomPlayLayer, PlayLayer) {
         PlayLayer::resetLevel();
         axiom::resetting = nullptr;
         if (axiom::initializing != this) {
-            if (axiom::active && axiom::active->inCommand) {
+            if (axiom::active && (axiom::active->inCommand || axiom::updateDepth || axiom::schedulerDepth || axiom::phaseDepth)) {
                 axiom::pendingStart = this;
                 // The enclosing command can continue updating after reset.
                 axiom::pendingStartUncertain = true;
             } else axiom::begin(this, axiom::resetCommandSeen);
         }
+    }
+    void playEndAnimationToPos(CCPoint position) {
+        ++axiom::phaseDepth;
+        auto run = axiom::active.get();
+        std::optional<size_t> row;
+        if (run && run->layer == this && !run->terminal) {
+            try { row = run->enterPhaseEvent(); }
+            catch (std::exception const& error) { axiom::fail(error.what()); }
+        }
+        PlayLayer::playEndAnimationToPos(position);
+        if (row && axiom::active.get() == run) {
+            try { run->exitPhaseEvent(*row); }
+            catch (std::exception const& error) { axiom::fail(error.what()); }
+        }
+        --axiom::phaseDepth;
+        axiom::flushPending();
     }
     void destroyPlayer(PlayerObject* player, GameObject* object) {
         PlayLayer::destroyPlayer(player, object);
@@ -417,6 +546,31 @@ class $modify(AxiomPlayLayer, PlayLayer) {
     }
 };
 class $modify(AxiomBaseLayer, GJBaseGameLayer) {
+    void update(float dt) {
+        ++axiom::updateDepth;
+        auto run = axiom::active.get();
+        std::optional<size_t> row;
+        float delivered = dt;
+        // PlayLayer inherits this native update in 2.2081. Do not alter editor
+        // updates, and do not replace getModifiedDelta or expected-tick logic.
+        if (axiom::clockPolicy == axiom::ClockPolicy::FixedBase60 &&
+                (static_cast<GJBaseGameLayer*>(PlayLayer::get()) == this || axiom::initializing == this))
+            delivered = 1.0f / 60.0f;
+        if (run && run->layer == this && !run->terminal) {
+            try { row = run->enterUpdate("updates", dt, delivered, run->updates); }
+            catch (std::exception const& error) { axiom::fail(error.what()); }
+        }
+        GJBaseGameLayer::update(delivered);
+        if (row && axiom::active.get() == run) {
+            try { run->exitUpdate("updates", *row, run->updates); }
+            catch (std::exception const& error) {
+                if (!run->updates.empty() && run->updates.back() == *row) run->updates.pop_back();
+                axiom::fail(error.what());
+            }
+        }
+        --axiom::updateDepth;
+        axiom::flushPending();
+    }
     void handleButton(bool down, int button, bool isPlayer1) {
         auto run = axiom::active.get();
         if (run && run->layer == this && !run->terminal) {
@@ -472,11 +626,32 @@ class $modify(AxiomBaseLayer, GJBaseGameLayer) {
             catch (std::exception const& error) { axiom::fail(error.what()); }
             if (axiom::active.get() == run) { run->inCommand = false; axiom::exportRun(); }
         }
-        if (static_cast<GJBaseGameLayer*>(axiom::pendingStart) == this) {
-            auto layer = axiom::pendingStart;
-            axiom::pendingStart = nullptr;
-            axiom::begin(layer, axiom::pendingStartUncertain);
+        axiom::flushPending();
+    }
+};
+class $modify(AxiomScheduler, CCScheduler) {
+    void update(float dt) {
+        ++axiom::schedulerDepth;
+        auto run = axiom::active.get();
+        std::optional<size_t> row;
+        auto delivered = axiom::clockPolicy == axiom::ClockPolicy::FixedScheduler240 ? 1.0f / 240.0f : dt;
+        if (run && !run->terminal) {
+            try { row = run->enterUpdate("scheduler_updates", dt, delivered, run->schedulers); }
+            catch (std::exception const& error) { axiom::fail(error.what()); }
         }
+        // Exactly one original call per actual scheduler callback. Cocos may
+        // scale its argument internally; we neither change its time scale nor
+        // separately advance actions, repeat frames or add a timestep carry.
+        CCScheduler::update(delivered);
+        if (row && axiom::active.get() == run) {
+            try { run->exitUpdate("scheduler_updates", *row, run->schedulers); }
+            catch (std::exception const& error) {
+                if (!run->schedulers.empty() && run->schedulers.back() == *row) run->schedulers.pop_back();
+                axiom::fail(error.what());
+            }
+        }
+        --axiom::schedulerDepth;
+        axiom::flushPending();
     }
 };
 class $modify(AxiomPlayer, PlayerObject) {
@@ -500,5 +675,8 @@ class $modify(AxiomPlayer, PlayerObject) {
     }
 };
 $on_mod(Loaded) {
+    try { axiom::selectClockPolicy(); }
+    catch (std::exception const& error) { axiom::clockSelectionError = error.what(); }
+    if (!axiom::clockSelectionError.empty()) log::error("AXIOM clock experiment refused: {}", axiom::clockSelectionError);
     log::info("AXIOM M1 adapter loaded; local capture/replay disabled by default; selected-state only; SDK {} bindings {}", AXIOM_SDK_COMMIT, AXIOM_BINDINGS_COMMIT);
 }

@@ -34,7 +34,9 @@ isolated; the launch procedure must establish that separately.
 
 ## Capture semantics
 
-Each `native_capture` document has schema version 1 and one `attempt`. It includes
+New `native_capture` documents have schema version 2 and one `attempt`. The Python
+reader also accepts historical schema 1 documents without the new diagnostics.
+Each document includes
 the exact SHA-256 of bytes held in `GJGameLevel::m_levelString`, executable, adapter
 and loaded mod binaries; pinned collector source/SDK/bindings identities;
 environment identity; selected state fields; trace integrity; and native terminal
@@ -53,6 +55,25 @@ are exactly the arguments supplied to that hook. This clock is not demonstrated
 to equal render frames, physical input arrival or all engine simulation steps.
 The zero sample uses `dt_seconds=0` and false flags as a declared initialization
 sentinel. Calls observed during initialization mark the start as unknown.
+
+Schema 2 additionally records paired entries/exits of the inherited
+`GJBaseGameLayer::update` and `CCScheduler::update`, in `attempt.updates` and
+`attempt.scheduler_updates`. Each stream reserves a contiguous `sequence` at
+entry and retains `parent_sequence`, command indices before/after, raw
+`original_dt_seconds`, `delivered_dt_seconds`, phase before/after, and diagnostic
+wall entry/exit times. Game-layer updates also reference `scheduler_sequence`.
+Trace and terminal samples reference the current update/scheduler sequence when
+observed. These hooks are not render callbacks. If recording begins inside a
+callback that already entered, no paired row is fabricated for that callback and
+its membership remains null.
+
+The raw phase object contains `level_end_animation_started` from
+`m_levelEndAnimationStarted` and `has_completed_level` from `m_hasCompletedLevel`.
+The `PlayLayer::playEndAnimationToPos` hook adds a paired `phase_events` record,
+including before/after flags, command index and update/scheduler membership. These
+are observations at native boundaries; no position or elapsed-time threshold is
+used to classify a finish phase. All flags, rotations and states remain in full
+repeat comparisons.
 
 `handleButton` records a **requested** event before its original call. Player
 `pushButton`/`releaseButton` record the callback and returned Boolean after the
@@ -87,18 +108,61 @@ native fixture; recorded requested events alone do not establish input response.
 
 Terminal state is sampled after the original `levelComplete` or `destroyPlayer`
 callback. Death requires the player `m_isDead` field after that callback. A terminal
-inside a command call is exported only after the final post-command trace sample.
+inside a command call is exported only after the final post-command trace sample
+and every enclosing observed or unrecorded update/scheduler/phase callback returns.
 These two state samples can differ because they occur at different hook boundaries.
 Aborts use the corresponding pause/quit/reset callback; collector errors use
 `AXIOM::error`. Exceptions, overflow and dropped records invalidate integrity.
 The exporter uses a temporary file followed by rename; output failures produce a
 log error and no claimed complete artifact. Capture is limited to 20,000 command
-calls, 12,000 delivered plus blocked input records and a 16 MiB export.
+calls, 20,000 records in each update stream, 256 phase events, 12,000 delivered plus
+blocked input records and a 16 MiB export.
 
 State fields are `x`, `y`, `y_velocity`, `rotation`, `is_dead` and a mode label for
 each player pointer. They exclude trigger, checkpoint, object, RNG, collision,
 audio, render and other engine state. Equality of this subset is only equality of
 the recorded subset. A second player pointer can exist while inactive.
+
+## Isolated clock experiment
+
+The launch argument `--geode:axiom.native-capture.clock-policy=native` selects the
+default observational mode. Two explicit experimental alternatives are accepted
+only in `AXIOMSandbox.exe` with `--geode:axiom-sandbox=true`:
+
+| Policy | Intervention |
+| --- | --- |
+| `native` | Forward both update arguments unchanged. |
+| `fixed-base-60` | Deliver `1.0f / 60.0f` to each actual current PlayLayer's inherited game-layer update; leave scheduler arguments unchanged. |
+| `fixed-scheduler-240` | Deliver `1.0f / 240.0f` to each actual scheduler callback from plugin load, including callbacks before capture begins; leave game-layer arguments unchanged. |
+
+There is exactly one original invocation per observed callback. The adapter does
+not add an accumulator, repeat callbacks, patch the game's expected tick count,
+override `getModifiedDelta`, change scheduler time scale or separately advance
+actions. Outside the guarded sandbox a fixed selection is refused and cannot
+change callback arguments. These are different interventions, with no claimed
+equivalence in wall time or vanilla gameplay. Fixed base dt does not control the
+general action scheduler; fixed scheduler dt can affect every scheduled selector
+and action, and the original scheduler may apply its own time scale internally.
+
+The environment's `clocks` retains `clock_policy`, `intervention_hook`,
+`step_numerator`, `step_denominator`, `intervention_scope="guarded-sandbox-process"`
+and explicit update/scheduler clock units. Rational steps are identity metadata;
+actual delivered float arguments are recorded separately. Baselines and replay
+plans must use the same exact environment hash. Original update dt and wall
+timing are explicitly cadence diagnostics; delivered dt, invocation grouping,
+native phases and all selected state remain strict comparison evidence. Passing
+an isolated fixed-clock fixture would establish only its recorded subset under
+that intervention, not general engine determinism or M1 physics completion.
+
+The separate scheduler/action timing is grounded in the pinned SDK's scheduler
+API and the upstream Cocos
+[scheduler implementation](https://github.com/cocos2d/cocos2d-x/blob/cocos2d-x-2.2.3/cocos2dx/CCScheduler.cpp#L725-L760)
+and [action manager implementation](https://github.com/cocos2d/cocos2d-x/blob/cocos2d-x-2.2.3/cocos2dx/actions/CCActionManager.cpp#L315-L335).
+These upstream implementations explain the experiment; they do not establish
+that the proprietary game matches all upstream internals. The author's
+[ToastyReplay timing hooks](https://github.com/ToastexGD/ToastyReplay/blob/016a5c8219e39c732583f655583ceee1982a3168/src/hacks/physicsbypass.cpp#L520-L602)
+demonstrate the two hook locations but also use tick patches and scheduling logic
+that AXIOM does not copy.
 
 ## AXIOM command replay JSON
 
