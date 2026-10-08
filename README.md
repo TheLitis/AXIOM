@@ -1,3 +1,5 @@
+![AXIOM — Geometry Dash Difficulty Model](docs/assets/axiom-banner.png)
+
 <p align="center"><strong>AXIOM</strong><br>Geometry Dash Difficulty Model<br><em>Difficulty that can be explained.</em></p>
 
 [![CI](https://github.com/TheLitis/AXIOM/actions/workflows/ci.yml/badge.svg)](https://github.com/TheLitis/AXIOM/actions/workflows/ci.yml)

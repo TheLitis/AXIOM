@@ -1,3 +1,5 @@
+![AXIOM — модель сложности Geometry Dash](docs/assets/axiom-banner.png)
+
 # AXIOM
 
 **Geometry Dash Difficulty Model** · «Сложность, которую можно объяснить».

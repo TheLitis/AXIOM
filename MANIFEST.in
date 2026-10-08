@@ -1,4 +1,5 @@
 include README.ru.md CONTRIBUTING.md AGENTS.md uv.lock
+include docs/assets/axiom-banner.png
 recursive-include docs *.md *.csv
 recursive-include examples *.json *.txt
 recursive-include native *.cpp *.hpp *.json *.md CMakeLists.txt
