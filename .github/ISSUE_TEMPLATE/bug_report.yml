@@ -1,0 +1,21 @@
+name: Bug report
+description: Report an incorrect calculation, import, or report behavior
+body:
+  - type: textarea
+    id: result
+    attributes:
+      label: Actual and expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include command, AXIOM/Python version, and a licensed synthetic or consented sample. Do not attach private player data.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and provenance
+      description: State whether the input is synthetic, supplied measurement, or verified native evidence.

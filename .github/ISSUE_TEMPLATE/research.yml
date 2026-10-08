@@ -1,0 +1,16 @@
+name: Research proposal
+description: Propose an adapter, factor, experiment, or validation improvement
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Research question and operational measurement
+    validations:
+      required: true
+  - type: textarea
+    id: design
+    attributes:
+      label: Experiment and validation plan
+      description: Include baseline, controlled conditions, independent test set, uncertainty and success criteria.
+    validations:
+      required: true

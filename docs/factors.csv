@@ -1,0 +1,65 @@
+factor_id,domain,definition,unit,measurement,mechanism,evidence_state,duplication_group
+PHY001,physics,Player position at decision boundary,game_units,Versioned native state capture,Defines reachable continuation state,proposed_unmeasured,boundary_state
+PHY002,physics,Player velocity at decision boundary,game_units_per_s,Versioned native state capture,Changes timing sensitivity and future trajectory,proposed_unmeasured,boundary_state
+PHY003,physics,Gravity and acceleration configuration,game_units_per_s2,Native state and settings export,Determines motion response to actions,proposed_unmeasured,boundary_state
+PHY004,physics,Player mode size and gravity direction,categorical,Native state trace,Changes input semantics and collision rules,proposed_unmeasured,boundary_state
+PHY005,physics,Active player collision shape,game_units,Versioned collider inspection and contact probes,Determines collision margins,proposed_unmeasured,collision_geometry
+PHY006,physics,Obstacle collision geometry and motion,game_units_and_s,Native collider and world-state trace,Sets feasible path including invisible obstacles,proposed_unmeasured,collision_geometry
+PHY007,physics,Portal orb slope and trigger event order,ordered_events,Native event trace with perturbation controls,Changes state propagation,proposed_unmeasured,event_semantics
+PHY008,physics,Initial-state reproducibility,divergence_rate,Repeated identical native runs,Bounds reliability of feasible-region measurement,proposed_unmeasured,measurement_quality
+INP001,input,Press timing relative to target,s,Game-scoped accepted-input timestamp,Sets action deviation,proposed_unmeasured,action_timing
+INP002,input,Release timing relative to target,s,Game-scoped accepted-input timestamp,Changes holds and subsequent transitions,proposed_unmeasured,action_timing
+INP003,input,Hold duration,s,Paired press and release timestamps,Constrains trajectory during held actions,proposed_unmeasured,hold_control
+INP004,input,Buffered input delay,s,Device arrival and engine acceptance trace if observable,Changes effective action time,proposed_unmeasured,technical_delay
+INP005,input,Dual-player coordination offset,s,Paired player-channel events,Requires coordinated dependent actions,proposed_unmeasured,joint_control
+INP006,input,Permitted button and device mappings,categorical,Declared input policy and device metadata,Defines available control strategies,proposed_unmeasured,input_policy
+TIM001,timing,Early admissible offset per action,s,Single-action perturbation with final oracle,Constrains negative timing error,proposed_unmeasured,local_window
+TIM002,timing,Late admissible offset per action,s,Single-action perturbation with final oracle,Constrains positive timing error,proposed_unmeasured,local_window
+TIM003,timing,Disconnected admissible timing components,count_and_s,Enumerated perturbation region with resolution,Permits alternative timed actions,proposed_unmeasured,local_window
+TIM004,timing,Joint feasible action region,region_in_s_dimensions,Multi-action perturbations with real entry state,Defines dependent tolerances,proposed_unmeasured,joint_control
+TIM005,timing,Inter-action interval tolerance,s,Joint action-shift probes,Constrains relative rather than absolute timing,proposed_unmeasured,joint_control
+TIM006,timing,Timing-error serial correlation,dimensionless,Repeated human trace residuals by lag,Changes probability of aligned or accumulated errors,proposed_unmeasured,error_process
+TIM007,timing,Run-wide timing offset variation,s,Hierarchical repeated-trace residual fit,Shifts an entire action sequence,proposed_unmeasured,error_process
+TIM008,timing,Local timing-error dispersion,s,Repeated comparable human action residuals,Controls marginal precision,proposed_unmeasured,error_process
+ROB001,robustness,Error propagation across actions,state_change_per_s,Perturbed native trajectory comparison,Transforms early errors into later requirements,proposed_unmeasured,boundary_state
+ROB002,robustness,Recoverable deviation set,region_in_state_units,Observation-constrained correction experiments,Distinguishes correctable errors from forced death,proposed_unmeasured,joint_control
+ROB003,robustness,Delayed failure after perturbation,s,Continue perturbed run through final oracle,Prevents optimistic local windows,proposed_unmeasured,measurement_quality
+ROB004,robustness,Robust alternative strategy availability,count_and_region,Search diverse witnesses then native verify,Avoids rating only a fragile replay,proposed_unmeasured,strategy_selection
+RHY001,rhythm,Inter-action interval sequence,s,Accepted input trace,Describes rhythm requirements,proposed_unmeasured,rhythm_structure
+RHY002,rhythm,Short burst input frequency,events_per_s,Declared sliding-window event count,Tests speed demands over defined duration,proposed_unmeasured,motor_speed
+RHY003,rhythm,Tempo change magnitude and frequency,ratio_and_events_per_s,Segmented interval sequence,Requires timing adaptation,proposed_unmeasured,rhythm_structure
+RHY004,rhythm,Motor-pattern recurrence,count,Declared sequence-matching metric,May enable chunking and skill transfer,proposed_unmeasured,memory_structure
+PER001,perception,Cue lead time before required action,s,Render and audio observation annotation,Separates anticipation from unexpected response,proposed_unmeasured,cue_access
+PER002,perception,Critical cue occlusion fraction,proportion,Blinded annotation or validated image metric,Reduces accessible information,proposed_unmeasured,cue_access
+PER003,perception,Cue contrast at gameplay scale,declared_contrast_metric,Calibrated frame capture measurement,May alter detection reliability,proposed_unmeasured,cue_access
+PER004,perception,Camera motion and zoom,time_series,Render observation trace,Changes perceived trajectory and cue visibility,proposed_unmeasured,visual_motion
+PER005,perception,Audio cue timing and availability,s_and_categorical,Consented audio observation metadata,Provides anticipatory timing references,proposed_unmeasured,cue_access
+PER006,perception,Display distraction condition,categorical,Controlled matched-condition experiment,May divert attention from relevant cues,proposed_unmeasured,attention
+MEM001,memory,Novel action sequence length,events,Declared learned-chunk protocol,May increase acquisition demand,proposed_unmeasured,memory_structure
+MEM002,memory,Similar cues requiring different actions,count,Annotated observation-action ambiguity,Can cause context confusion,proposed_unmeasured,memory_structure
+MEM003,memory,Available route information,categorical,Protocol for videos replays and guidance,Changes discovery burden,proposed_unmeasured,preparation_policy
+LRN001,learning,Initial joint skill profile,versioned_vector,Standardized pretest across skill dimensions,Changes level-specific success and transfer,proposed_unmeasured,ability_profile
+LRN002,learning,Prior level familiarity,active_h_and_categorical,Participant report plus historical trace when available,Separates fresh learning from practiced execution,proposed_unmeasured,preparation_policy
+LRN003,learning,Active cumulative practice time,h,Versioned session and attempt duration accounting,Changes learned performance,proposed_unmeasured,learning_curve
+LRN004,learning,Practice allocation by section,active_h_vector,Practice-mode and section-entry traces,Changes uneven preparation,proposed_unmeasured,learning_curve
+LRN005,learning,Skill retention after break,performance_change,Repeated matched pre and post break tests,Captures retention and recovery,proposed_unmeasured,rest_schedule
+LRN006,learning,Transfer from related patterns,performance_change,Controlled familiar and novel pattern tests,Changes effective preparation requirement,proposed_unmeasured,ability_profile
+STA001,state,Within-attempt precision change,s_per_elapsed_s,Repeated traces conditioned on preparation and section,Tests fatigue or pressure pathways,proposed_unmeasured,error_process
+STA002,state,Session duration since rest,s,Session time and rest metadata,May change attention and execution,proposed_unmeasured,rest_schedule
+STA003,state,Warmup state,categorical_and_s,Versioned warmup protocol,Changes starting performance,proposed_unmeasured,rest_schedule
+STA004,state,Missed or unintended action rate,events_per_exposure,Repeated human trace and outcome annotation,Captures lapses beyond continuous timing jitter,proposed_unmeasured,attention
+STA005,state,Personal-best context,categorical,Private progress state with participant consent,Tests progress-pressure association,proposed_unmeasured,attention
+MAC001,macro,Full-run duration,s,Native same-run completion trace,Defines exposure and attempt time,proposed_unmeasured,attempt_cost
+MAC002,macro,Restart cost after death,s,Death-to-next-start trace,Adds active time cost to repeated attempts,proposed_unmeasured,attempt_cost
+MAC003,macro,Section location along full run,s_and_index,Native section-entry trace,Changes exposure probability and accumulated state,proposed_unmeasured,attempt_cost
+MAC004,macro,Reach probability for a late section,proportion,Full attempts entering section divided by genuine starts,Defines late-section practice exposure,proposed_unmeasured,exposure_selection
+MAC005,macro,Mode transition density,events_per_s,Native mode event trace,May require control and attention switching,proposed_unmeasured,event_semantics
+TEC001,technical,Physics update schedule,s_and_policy,Native engine configuration and tick trace,Defines simulated action and collision timing,proposed_unmeasured,engine_identity
+TEC002,technical,Render frame interval distribution,s,Frame-present trace with acquisition method,Changes observation cadence,proposed_unmeasured,display_timing
+TEC003,technical,Input timestamp and acceptance resolution,s,Declared input pipeline plus calibration probes,Constrains effective input timing,proposed_unmeasured,input_policy
+TEC004,technical,End-to-end input/display latency,s,Independent device-to-photon measurement when available,Changes feedback and timing alignment,proposed_unmeasured,technical_delay
+TEC005,technical,Latency jitter distribution,s,Repeated independent latency calibration,Adds technical timing variation,proposed_unmeasured,technical_delay
+TEC006,technical,Missed frames and update stalls,count_and_s,Frame and simulation-clock discontinuity trace,Changes observation and execution conditions,proposed_unmeasured,display_timing
+TEC007,technical,Detail mode and modification configuration,categorical_and_hash,Challenge manifest,Changes visuals or execution environment,proposed_unmeasured,engine_identity
+OBS001,observation,Dropout reason and practice at stopping,categorical_and_h,Consented campaign close record,Identifies potentially informative censoring,proposed_unmeasured,followup_bias
+OBS002,observation,Recording coverage and unobserved practice,proportion_and_h,Session reconciliation and participant disclosure,Bounds first-completion-time interpretation,proposed_unmeasured,followup_bias

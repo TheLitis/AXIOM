@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "axiom-gd"
+version = "0.1.0"
+description = "Reproducible Geometry Dash difficulty research: evidence before ratings"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{name = "TheLitis"}]
+keywords = ["geometry-dash", "difficulty", "survival-analysis", "research", "timing"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.12,<1", "build>=1.2,<2"]
+
+[project.scripts]
+axiom = "axiom.cli:main"
+
+[project.urls]
+Repository = "https://github.com/TheLitis/AXIOM"
+Issues = "https://github.com/TheLitis/AXIOM/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

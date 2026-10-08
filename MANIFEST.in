@@ -1,0 +1,3 @@
+include README.ru.md CONTRIBUTING.md AGENTS.md uv.lock
+recursive-include docs *.md *.csv
+recursive-include examples *.json *.txt
