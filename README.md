@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-79efd0.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-86b4ff.svg)](pyproject.toml)
 
-[Русская версия](README.ru.md) · [Methodology](docs/methodology.md) · [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md)
+[Русская версия](README.ru.md) · [Final-system requirements](docs/end-goal-requirements.md) · [Methodology](docs/methodology.md) · [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md)
 
 AXIOM is an open research project for measuring Geometry Dash difficulty through reproducible game evidence, human execution and learning. **Axiom Rating (AR)** is the proposed presentation scale; the model and its evidence come first.
 

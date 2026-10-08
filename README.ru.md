@@ -2,7 +2,7 @@
 
 **Geometry Dash Difficulty Model** · «Сложность, которую можно объяснить».
 
-[English](README.md) · [Методология](docs/methodology.md) · [Архитектура](docs/architecture.md) · [План развития](docs/roadmap.md)
+[English](README.md) · [Что нужно для конечной цели](docs/end-goal-requirements.ru.md) · [Методология](docs/methodology.md) · [Архитектура](docs/architecture.md) · [План развития](docs/roadmap.md)
 
 AXIOM — открытый исследовательский проект для оценки сложности Geometry Dash через измерения движка, человеческое исполнение и освоение. Рейтинговая шкала называется **Axiom Rating (AR)**.
 

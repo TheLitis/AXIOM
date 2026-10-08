@@ -11,7 +11,7 @@ This is a gated research roadmap, not a claim that every stage is implemented. D
 | M4 — Full-level time model | Persistent state across sections; active-time first-completion forecasts; versioned reference package | Held-out levels and future campaigns; censoring/quit treatment; reference T50 supported; coverage and calibration acceptable under frozen criteria | AR with scope and uncertainty in the calibrated domain |
 | M5 — Public research service | Reproducible evidence pages, versioned comparisons, data/model cards, correction process | Independent replication, provenance review, operational checks and consented releases | Public ratings with audit trails and explicit limits |
 
-M0 is the initial implementation target. M1–M5 require new engineering or data; this repository has not established their evidence gates.
+The M0 offline implementation is available in v0.1.0 for its documented formats and scenarios. M1–M5 require new engineering or data; this repository has not established their evidence gates. [Final-system requirements](end-goal-requirements.md) maps current code to the end-state contract, prerequisites and critical path.
 
 ## First human benchmark
 
