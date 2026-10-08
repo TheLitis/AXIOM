@@ -74,11 +74,12 @@ The helper is inert unless both the executable name `AXIOMSandbox.exe` and the e
 Automated experiments prepare this test copy and terminate only the processes they start:
 
 ```powershell
-powershell -File .\scripts\run-native-smoke.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -Repetitions 3
-powershell -File .\scripts\run-native-controls.ps1 -GameDirectory 'C:\path\to\Geometry Dash'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-native-clock-study.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -Repetitions 3
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-native-smoke.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -Fixture spike -ClockPolicy fixed-scheduler-240 -Repetitions 3
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-native-controls.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -ClockPolicy fixed-scheduler-240
 ```
 
-The smoke script requires the complete press/release plan and native player callbacks, then fails if exact repeat comparison differs. The controls script requires native death on a generated spike fixture and rejection of a wrong-level replay. Both preserve local evidence and restore the previous replay file. See the [executed validation ledger](native-validation.md) for actual results and remaining gates.
+The smoke script requires the complete press/release plan and native player callbacks, then fails if exact repeat comparison differs. The controls script requires native death on a generated spike fixture and rejection of a wrong-level replay. The clock study retains six cases, including inconsistent results, and requires both fixed Scheduler cases to pass. Each script preserves local evidence and restores the previous fixture, replay and sandbox mod/loader settings by bytes and existence, including after an experiment failure. A supplied smoke output directory must not already exist. `-ExecutionPolicy Bypass` applies only to that PowerShell process. See the [initial ledger](native-validation.md) and [executed clock investigation](clock-investigation.md) for actual results and remaining gates.
 
 Two save locations must be distinguished. The helper redirects engine `CCFileUtils` writable paths to `.tools/runtime/sandbox-saves`. Geode independently derives its save root from the executable filename: normally `%LOCALAPPDATA%\AXIOMSandbox`. Thus the mod's capture directory is normally `%LOCALAPPDATA%\AXIOMSandbox\geode\mods\axiom.native-capture\captures` and its replay source is the adjacent `replay.json`. If AppData directory creation fails, Geode falls back to the executable directory; inspect the runtime log/path instead of assuming the usual location. [Pinned Windows save-root implementation](https://github.com/geode-sdk/geode/blob/2a5fd87433da47d6bf07221774f0cbb25535ae08/loader/src/platform/windows/util.cpp), [mod save path](https://github.com/geode-sdk/geode/blob/2a5fd87433da47d6bf07221774f0cbb25535ae08/loader/src/loader/ModImpl.cpp)
 
@@ -90,12 +91,23 @@ Keep these measurements separate:
 |---|---|
 | Input hook timestamp | When the adapter observes delivery to a declared game input function |
 | Command-processing callback index | The sequence of the hooked processing calls, with preserved `dt` and half/last-call flags |
+| Gameplay/Scheduler update sequences | Paired entry/exit records with nesting, original and delivered `dt`, command bounds and native phase flags |
 | Raw callback `dt` sum | Sum of the supplied callback arguments; no independently established simulation-time interpretation |
 | Monotonic wall time | Capture duration and scheduling/recording overhead |
 | Render/presentation time | Unknown unless independently observed |
 | Hardware arrival / device-to-photon latency | Unknown unless measured through a separate acquisition method |
 
 The pinned 2.2081 [bindings](https://github.com/geode-sdk/bindings/blob/2a8b5c489ce8b49e7061b0543aa2bc5b22570063/bindings/2.2081/GeometryDash.bro) expose `handleButton(bool down, int button, bool isPlayer1)` and `processCommands(float dt, bool isHalfTick, bool isLastTick)`. A command callback is not automatically a visual frame or a fixed 240-Hz physics tick. The boolean channel parameter means player 1 when true. Preserve callback flags, original event order and the exact observation/injection phase.
+
+The launch argument `--geode:axiom.native-capture.clock-policy=<policy>` selects an explicit clock policy:
+
+| Policy | Forwarded update argument |
+|---|---|
+| `native` (default) | Original argument unchanged |
+| `fixed-base-60` | Float32 `1/60` once per original `GJBaseGameLayer::update` call on the initializing/current PlayLayer |
+| `fixed-scheduler-240` | Float32 `1/240` once per original `CCScheduler::update` call throughout the guarded sandbox process, including before recording starts |
+
+Non-native policies require `AXIOMSandbox.exe` and the explicit sandbox argument. They change the declared experiment environment; neither policy asserts a measured wall frequency or equivalence to ordinary gameplay. There is no accumulator, extra update call, manual ActionManager advancement, position/rotation correction or checkpoint restoration. The manifest identifies policy, hook, rational step and scope; original arguments and wall cadence remain observable. See the [clock investigation](clock-investigation.md) for the tested domain.
 
 Calling the original input function does not independently prove that the physical device event arrived then, or that a later game stage accepted every request. Label the capture as hook-delivered input unless acceptance/rejection/buffering is separately observed. Input events generated by playback are not human observations.
 
@@ -134,9 +146,11 @@ These indices illustrate the format, not a verified route. Events use integer in
 
 ## Capture schema and comparison
 
-The native record is schema 1, `kind: native_capture`, with one `attempt` per file. Its provenance is declared `native-engine-capture` with `independently_verified: false`; capture origin is not authenticated by parsing JSON. The level hash identifies the exact bytes held in `GJGameLevel::m_levelString`, not inferred collision geometry. The collector's source-tree digest identifies the compiled native sources, CMake and mod manifest even when a Git commit predates local edits. The environment has a recursive sorted-key compact UTF-8 JSON hash and `configuration_complete: false`. Selected player-state fields are recorded with `state_completeness: selected_fields_only`, not a restorable snapshot.
+The current native record is schema 2, `kind: native_capture`, with one `attempt` per file. The inspector also accepts schema 1 without fabricating its absent update/phase observations; older input policies without a blocked-request stream remain explicitly marked as not recorded. Provenance is declared `native-engine-capture` with `independently_verified: false`; capture origin is not authenticated by parsing JSON. The level hash identifies the exact bytes held in `GJGameLevel::m_levelString`, not inferred collision geometry. The collector's source-tree digest identifies the compiled native sources, CMake and mod manifest even when a Git commit predates local edits. The environment has a recursive sorted-key compact UTF-8 JSON hash and `configuration_complete: false`. Selected player-state fields are recorded with `state_completeness: selected_fields_only`, not a restorable snapshot.
 
-The trace begins at command index 0 after initialization/reset, then retains contiguous command-processing calls with `dt_seconds`, `is_half_tick` and `is_last_tick`. Initial trace timing is zero. Command indices advance before the original callback; regular sampled states are taken after it. The terminal `levelComplete`/`destroyPlayer` snapshot is separate: it may differ from the final post-processing sample and must be compared separately. Terminal export during a processing call waits for the post-call trace.
+The trace begins at command index 0 after initialization/reset, then retains contiguous command-processing calls with `dt_seconds`, `is_half_tick` and `is_last_tick`. Initial trace timing is zero. Command indices advance before the original callback; regular sampled states are taken after it. The terminal `levelComplete`/`destroyPlayer` snapshot is separate: it may differ from the final post-processing sample and must be compared separately. Export waits for enclosing command/update/Scheduler/ending-phase hooks to return.
+
+Schema 2 adds `attempt.updates`, `attempt.scheduler_updates` and `attempt.phase_events`. Paired update records retain entry/exit command bounds, nesting, original/delivered `dt`, raw ending/completion flags and wall timestamps. Trace and terminal samples retain the enclosing update/Scheduler sequence; calls already in progress when recording begins have unknown membership. Paired `PlayLayer::playEndAnimationToPos` observations supply the native ending transition, without guessing a percentage or coordinate boundary. Limits are 20,000 commands, 20,000 rows per update stream, 256 phase events and 16 MiB per source file. Missing/truncated records invalidate terminal evidence.
 
 Delivered `inputs` preserve the requested `handleButton` phase and observed player push/release callback phases, including the native return value where available. Sources are observed/replay, while an attempt's origin is unknown/replay; observed delivery alone does not attest that a human generated it. `attempt.blocked_inputs` is separate, always present and empty for observation capture. Each blocked diagnostic has its own contiguous sequence, command index, player, raw signed-int32 button, pressed state, `source: unknown` and monotonic wall timestamp. It has no delivered phase or native return because the original handler is not called. Delivered plus blocked records share a 12,000-record limit. Initial start kinds distinguish `level_start`, `practice`, `start_position` and `unknown`. A second player pointer can exist while inactive; player activity is not captured and its fields alone must not override the native terminal callback.
 
@@ -149,7 +163,7 @@ axiom native 'C:\local-evidence\capture-a.json' --json .\reports\native\inspecti
 axiom native-compare 'C:\local-evidence\replay-a.json' 'C:\local-evidence\replay-b.json' --json .\reports\native\comparison.json
 ```
 
-The current comparison is exact for raw callback arguments, selected states, delivered input phases/order/native return values, retained replay plan and terminal placement/state. Blocked-request differences are reported separately and do not decide delivered selected-subset consistency. Diagnostic input wall timestamps and terminal wall duration are excluded. Thus a matching subset does not assert an identical full request stream. The reported callback `dt` sum must not be relabelled verified simulation time. Aborted/error or incomplete captures are rejected as terminal evidence; preserve their local files and logs as failed attempts.
+The comparison is exact for raw command callback arguments, selected states including rotation, delivered input phases/order/native return values, retained plan, terminal placement/state, raw native phases, update contexts, delivered update/Scheduler rows and native phase events. Original incoming update arguments and wall timestamps remain separate diagnostics; delivered arguments still decide equality. In `native` mode delivered equals original, so its variable arguments still participate. Blocked-request differences are also reported separately. A matching subset does not assert byte-identical files or an identical full request stream. `pre_end_animation_diagnostics` uses the actual recorded native callback boundary; prefix agreement cannot override failed whole-run comparison. The reported callback `dt` sum must not be relabelled verified simulation time. Aborted/error or incomplete captures are rejected as terminal evidence; preserve their local files and logs as failed attempts.
 
 ## Executable first-checkpoint checklist
 

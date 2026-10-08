@@ -1,6 +1,6 @@
 # AXIOM architecture
 
-AXIOM separates evidence acquisition, execution models, learning models, and publication. The initial release is an offline Python laboratory; native Geometry Dash integration is a later milestone.
+AXIOM separates evidence acquisition, execution models, learning models, and publication. The released v0.1.0 is an offline Python laboratory. Current development also provides an experimental opt-in Windows x64 / GD 2.2081 / Geode 5.8.2 capture and command-replay adapter. Its [operation and limits](native-adapter.md) and [clock investigation](clock-investigation.md) document native callbacks and repeat agreement of selected fields on two generated fixtures under a declared fixed-scheduler intervention. The complete M1 gate, native timing-window measurement and human calibration remain open.
 
 ## Initial implementation surface
 
@@ -16,7 +16,7 @@ flowchart LR
     B --> E[Censored survival baseline]
     D --> F[Evidence-aware JSON and HTML]
     E --> F
-    G[Future native engine adapter] -. measured regions and run evidence .-> B
+    G[Experimental native capture and replay] -. selected run evidence .-> B
     H[Future calibrated human and learning models] -. forecasts .-> F
 ```
 
@@ -27,6 +27,7 @@ flowchart LR
 | Ingestion | Preserve raw evidence, validate units/order, canonicalize metadata, hash payloads | That a file's reported engine version is independently verified |
 | Level inspector | Decode known serialization fields and report objects/settings | Exact hitboxes, active trigger semantics, or physical reachability |
 | Replay inspector | Normalize documented formats, presses/releases, players, and clocks | Compatibility with every macro format or successful native playback |
+| Experimental native observer | Record version-specific callbacks, binary identities, declared clocks and selected state; replay an explicit owned-channel plan | Complete state/configuration coverage, ordinary-input equivalence, checkpoints or automatic timing-window measurement |
 | Constraint analyzer | Membership in supplied local/joint feasible regions | Discovery of the complete feasible set in the game |
 | Execution baseline | Seeded, declared correlated noise; conditional success and numerical uncertainty | Human calibration or perception-aware control |
 | Survival baseline | Risk sets, censoring, descriptive median where supported | A causal learning model or unbiased predictions under informative dropout |
@@ -35,7 +36,7 @@ flowchart LR
 
 Evidence states are distinct: **synthetic**, **externally measured**, **native verified**, and **human calibrated** describe origins or validation, not successive values of a generic accuracy score. A physical witness and a calibrated human forecast answer different questions.
 
-The v0.1 challenge record uses `id`, `level_sha256`, `game_version`, `physics_version`, `input_policy`, and `environment_id`. Native evidence will need the richer manifest below. For the offline Gaussian baseline, independent per-action error, a common run shift, and stationary AR(1) drift have separately declared scales; serial correlation is a sensitivity assumption. Route membership also checks same-channel press/release ordering. A Wilson interval summarizes numerical sampling error conditional on all these inputs.
+The v0.1 challenge record uses `id`, `level_sha256`, `game_version`, `physics_version`, `input_policy`, and `environment_id`. Experimental native captures additionally retain binary/source identities and declared input/clock policies, but their configuration and state coverage remain incomplete; the full target manifest is below. For the offline Gaussian baseline, independent per-action error, a common run shift, and stationary AR(1) drift have separately declared scales; serial correlation is a sensitivity assumption. Route membership also checks same-channel press/release ordering. A Wilson interval summarizes numerical sampling error conditional on all these inputs.
 
 ## Identity and evidence package
 
@@ -49,9 +50,9 @@ Every experiment should retain a manifest containing:
 
 The logical challenge identifier is a hash of a canonical, versioned identity manifest. Keep raw file hashes too: identical labels or parsed object counts are insufficient. Define canonicalization before cross-tool comparisons; the initial prototype may retain metadata without implementing the full native manifest.
 
-## Native engine adapter contract (design, not implemented)
+## Full native engine adapter contract (target design)
 
-The adapter runs a legally installed Geometry Dash build through documented version-specific hooks. Geode is a candidate integration framework; its hook API is infrastructure, not proof that arbitrary captured state is complete. [Geode hooks](https://docs.geode-sdk.org/handbook/vol1/chap1_3/)
+The experimental implementation runs a legally installed Geometry Dash build through version-specific Geode hooks. Its limited [current contract](native-adapter.md) does not implement the complete API proposed below. Hardware acceptance, observation-only human control, state restoration, measured feasible regions and complete environment coverage remain target requirements. Geode's hook API is infrastructure, not proof that arbitrary captured state is complete. [Geode hooks](https://docs.geode-sdk.org/handbook/vol1/chap1_3/)
 
 | Operation | Required behavior |
 |---|---|
@@ -82,4 +83,4 @@ All gates must refer to the same run/configuration lineage. A passing suffix fro
 
 Archive raw immutable evidence before derived features. Distinguish Monte Carlo error from measurement and model uncertainty. Never silently replace a censored median, missing input rule, unknown hash, or untested engine with a default that looks verified. Store assumptions and unresolved fields explicitly.
 
-Publish consented, minimized telemetry and derived artifacts; keep identifying player mappings private by default. The offline report stays local and requires no account, upload, or background keyboard collection. [Telemetry protocol](telemetry-protocol.md) defines the proposed native records; [roadmap](roadmap.md) defines the gates between an offline prototype and public calibrated ratings.
+Publish consented, minimized telemetry and derived artifacts; keep identifying player mappings private by default. The offline report and opt-in native capture stay local and require no account, upload, or background keyboard collection. [Telemetry protocol](telemetry-protocol.md) defines the broader proposed campaign records; [current adapter semantics](../native/README.md#capture-semantics) describe implemented capture/replay files; [roadmap](roadmap.md) defines the remaining gates toward public calibrated ratings.

@@ -13,7 +13,7 @@ This is a gated research roadmap, not a claim that every stage is implemented. D
 
 The M0 offline implementation is available in v0.1.0 for its documented formats and scenarios. Current development includes an [experimental M1 observer/replay adapter](native-adapter.md) and strict capture comparison. Its complete acceptance gate remains open; M2–M5 require new engineering or data. [Final-system requirements](end-goal-requirements.md) maps the v0.1.0 baseline to the end-state contract, prerequisites and critical path.
 
-The [native validation ledger](native-validation.md) records real-engine completion, press/release response and terminal controls. Exact repeated traces diverge under the tested incomplete configuration; M1 repeatability remains a failed gate. The next engineering step is to characterize the command/render scheduling and terminal transition, then test replay under an explicitly controlled clock and broader fixture matrix.
+The [initial native validation ledger](native-validation.md) retains failed exact replay comparison. The [clock investigation](clock-investigation.md) records two generated fixtures × three policies × three replay completions, with paired update observations and a native ending-phase callback. The fixed Scheduler intervention passed exact recorded-subset comparison on both fixtures; the native and fixed gameplay-update policies failed. This scoped result leaves the complete M1 gate open. Next, expand the mechanics matrix, test ordinary-input equivalence and interruptions, and measure configuration coverage and recording overhead before deriving timing windows.
 
 ## First human benchmark
 

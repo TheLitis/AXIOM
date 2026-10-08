@@ -14,7 +14,7 @@ The central question is: *What is the probability that a player with a specified
 
 The released v0.1.0 is a dependency-free Python laboratory with an interactive offline report. Current development adds an experimental, opt-in Windows x64 / GD 2.2081 / Geode 5.8.2 observer and command-call replay. **Human difficulty remains uncalibrated and the complete M1 acceptance gate remains open.** Native origin declared in an imported file is not authenticated by the Python inspector. There are no established AR scores for real levels, no GRIEF/Slaughterhouse difficulty ratio, and no claim of a universal human limit.
 
-The [native validation ledger](docs/native-validation.md) records actual engine loading, a baseline, three replay completions with player push/release and a jump response, native death and wrong-level rejection. Exact replay comparison **failed** on recorded callback flags and selected player fields; this divergence remains visible and blocks repeatability acceptance. Raw captures and game binaries stay local.
+The [initial native validation ledger](docs/native-validation.md) retains the failed replay comparison. The subsequent [clock investigation](docs/clock-investigation.md) tested two generated fixtures under three clock policies, with three replay completions per case. Exact agreement of all compared fields passed for both fixtures under the explicitly declared fixed Scheduler intervention; the native and fixed gameplay-update policies still diverged. This establishes repeatability of the recorded subset in that experimental environment. Raw captures and game binaries stay local.
 
 | Available now | Evidence and limits |
 |---|---|
@@ -24,7 +24,7 @@ The [native validation ledger](docs/native-validation.md) records actual engine 
 | Correlated-noise experiments | Seeded Gaussian jitter, common shift, stationary AR(1) drift; declared assumptions, not measured human abilities |
 | Censored first-completion statistics | Kaplan–Meier curve, supported T50, conservative participant bootstrap, compatible provisional AR |
 | Supplied terminal-oracle ledger checks | Exact manifest consistency and observed repeatability; does not run/authenticate the engine |
-| Experimental native capture and replay | Version-specific Geode source, local opt-in capture, binary manifests, native death/finish callbacks and selected player fields; incomplete configuration/state coverage |
+| Experimental native capture and replay | Version-specific Geode source, local opt-in capture, binary manifests, death/finish/ending-phase callbacks, paired gameplay/Scheduler updates and selected player fields; incomplete configuration/state coverage |
 | Native capture inspection/comparison | Strict integrity and identity checks; exact comparison of recorded replay subsets; files alone do not establish complete engine determinism |
 | Portable HTML and JSON | Interactive route selection, window/first-completion plots, source identity and interpretation limits; works offline |
 | Research framework | 64 proposed factors, telemetry design, baseline comparisons and a gated implementation roadmap |
@@ -55,6 +55,7 @@ axiom cohort examples/cohort.json --bootstrap 1000 --seed 42 --html reports/coho
 axiom trials examples/trials.json --json reports/trials.json
 axiom native examples/native/synthetic-capture-a.json --json reports/native.json
 axiom native-compare examples/native/synthetic-capture-a.json examples/native/synthetic-capture-b.json --json reports/native-comparison.json
+axiom native-compare examples/native/synthetic-clock-a.json examples/native/synthetic-clock-b.json --json reports/native-clock-comparison.json
 ```
 
 All commands validate input; unknown evidence remains unknown. The native examples above are synthetic schema fixtures. See [import formats](docs/formats.md), [timing scenarios](docs/timing-format.md), [cohorts](docs/survival-format.md), [oracle ledgers](docs/oracle-format.md) and [native operation and acceptance](docs/native-adapter.md). Building the native mod requires a separate compiler/SDK setup; Python analysis remains dependency-free.
@@ -77,7 +78,7 @@ Physical feasibility, execution difficulty and learning difficulty remain separa
 
 ## Next scientific milestone
 
-Complete the native adapter acceptance matrix: true-start replay agreement, explicit clock/phase semantics, nontrivial press/release and negative controls, complete environment coverage, recording overhead and measured throughput. Verify repeatability before deriving timing windows. Then test whether a calibrated section-success model improves predictions on unseen players against an independent-window baseline.
+Extend the two-fixture clock result across a declared mechanics matrix; test ordinary-input equivalence, complete environment coverage, interruptions, recording overhead and measured throughput. Establish the supported replay domain before deriving timing windows. Then test whether a calibrated section-success model improves predictions on unseen players against an independent-window baseline.
 
 Native integration is experimental; automatic window discovery, perception/learning models and real-level leaderboards remain **planned work**, with acceptance gates in the [roadmap](docs/roadmap.md). Geode, Frame Window Counter, NaNDL and the statistical/motor-control literature are prior work, documented with primary references in [research sources](docs/research-sources.md).
 

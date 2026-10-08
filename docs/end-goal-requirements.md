@@ -4,6 +4,8 @@
 
 Assessment date: 2026-10-09. Baseline: v0.1.0, commit `67080d6`. This document defines a proposed final product, its prerequisites and evidence gates. It does not claim implementation or empirical validation of those gates.
 
+Development update: an [experimental native adapter](native-adapter.md) now builds and captures/replays in Windows x64 / GD 2.2081 / Geode 5.8.2. The [clock investigation](clock-investigation.md) records repeat agreement of the declared subset on two generated fixtures under a fixed-scheduler intervention, while native and fixed-game-layer policies still diverge. This is progress beyond the released baseline, not completion of the full M1 contract, timing-window measurement or human difficulty calibration.
+
 ## 1. Final product contract
 
 For an exact level revision, verified execution environment, information/practice protocol and specified player or reference population, AXIOM should produce:
@@ -20,7 +22,7 @@ Predicting previously unseen challenges is part of the goal. Summarizing campaig
 
 Two supported reporting modes should be kept distinct: population AR for a frozen reference package, and personalized forecasts for measured player profiles. Frontier-player comparisons require a separate measured population; abilities from different people's best performances cannot be combined into one fictitious player.
 
-## 2. Current implementation and missing chain
+## 2. Released baseline and remaining chain
 
 | Area | Available in v0.1 | Required for the end state |
 |---|---|---|
@@ -38,7 +40,7 @@ Two supported reporting modes should be kept distinct: population AR for a froze
 | Validation | Software and synthetic examples | Preregistered independent human prediction benchmarks, calibration, coverage, subgroup and dropout checks |
 | Publication | GitHub, CLI and offline HTML | Versioned evidence/model/data cards, correction process and usable supported capture/analyze workflow |
 
-The critical missing chain is **native challenge evidence → measured demands → calibrated human execution/learning → independent forecasts → eligible public AR**. A website, more factors or more Monte Carlo draws cannot complete this chain by themselves.
+The critical remaining chain is **complete native challenge evidence → measured demands → calibrated human execution/learning → independent forecasts → eligible public AR**. The experimental adapter starts the evidence stage but does not provide the later stages. A website, more factors or more Monte Carlo draws cannot complete this chain by themselves.
 
 ## 3. Proposed first supported domain
 
@@ -108,7 +110,7 @@ Begin with local capture, file-based evidence bundles, CLI and static evidence p
 
 Required capabilities are native C++/Geode engineering, Python/statistical modeling, experiment design, player/domain knowledge and participant coordination. One maintainer with Codex can combine software roles; consenting real players and independent human observations still take real time. A statistician/methods reviewer and external replication improve the eventual evidence.
 
-The local audit confirms an installed game/Geode and part of a native build toolchain. A matching SDK/CLI setup and runtime compatibility remain untested. This is a starting resource, not native AXIOM support. Personal filesystem paths and user identifiers stay in ignored local reports; non-identifying game, adapter, mod and challenge hashes remain in reproducible public evidence where permitted.
+The version-pinned native compiler/SDK/CLI build and actual game loading, capture, input response, death/finish callbacks and bounded replay checks have now been exercised; their identities and results are recorded in the [native validation](native-validation.md) and [clock investigation](clock-investigation.md) ledgers. This establishes the documented experimental fixtures and policies, not general native compatibility or the complete M1 contract. Personal filesystem paths and user identifiers stay in ignored local reports; non-identifying game, adapter, mod and challenge hashes remain in reproducible public evidence where permitted.
 
 Benchmark native throughput before choosing hardware or cloud budget. Illustrative computation only: one million independent one-second runs at real-time speed require approximately 11.6 continuous days on one worker before overhead. The current mathematical Monte Carlo loop is not a benchmark of native replay throughput. Accelerated runs, parallel instances or surrogate simulators require their own semantic/differential validation.
 

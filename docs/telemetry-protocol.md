@@ -1,6 +1,6 @@
 # Proposed native telemetry protocol
 
-Status: **design only**. The offline prototype consumes supplied files and observations; it does not install a game hook or collect background input. This protocol is a target for a later native adapter, not the current JSON schema.
+Status: **target protocol; partially covered by an experimental native adapter**. The released v0.1.0 offline prototype consumes supplied files and observations. Current development adds opt-in Windows x64 / GD 2.2081 / Geode 5.8.2 capture and command replay; its [operation and limits](native-adapter.md), [implemented capture/replay schema](../native/README.md#capture-semantics), and [clock investigation](clock-investigation.md) are separate from the broader design below. Campaign enrollment, the complete focus/latency contract, future-relevant snapshots, validated timing windows and human calibration are not implemented by that limited collector. The full M1 gate remains open; there is no background input collection.
 
 ## Consent and capture scope
 

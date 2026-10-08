@@ -74,11 +74,12 @@ Start-Process -FilePath $sandboxExe -WorkingDirectory (Split-Path -Parent $sandb
 Автоматические эксперименты подготавливают тестовую копию и завершают только запущенные ими процессы:
 
 ```powershell
-powershell -File .\scripts\run-native-smoke.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -Repetitions 3
-powershell -File .\scripts\run-native-controls.ps1 -GameDirectory 'C:\path\to\Geometry Dash'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-native-clock-study.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -Repetitions 3
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-native-smoke.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -Fixture spike -ClockPolicy fixed-scheduler-240 -Repetitions 3
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-native-controls.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -ClockPolicy fixed-scheduler-240
 ```
 
-Smoke-скрипт требует исполнения всего расписания press/release и нативных callbacks игрока, затем завершается ошибкой при расхождении точного сравнения. Контрольный скрипт требует нативной смерти на сгенерированном препятствии и отказа от replay с неверным уровнем. Оба сохраняют локальные доказательства и восстанавливают прежний файл replay. Фактические результаты и открытые критерии находятся в [журнале выполненных проверок](native-validation.ru.md).
+Smoke-скрипт требует исполнения всего расписания press/release и нативных callbacks игрока, затем завершается ошибкой при расхождении точного сравнения. Контрольный скрипт требует нативной смерти на созданном препятствии и отказа от replay с неверным уровнем. Исследование часов сохраняет шесть комбинаций, включая расхождения, и требует успешного сравнения обоих случаев с фиксированным Scheduler. Каждый скрипт сохраняет локальные доказательства и восстанавливает прежние fixture, replay и настройки sandbox-мода/loader — точные байты и факт существования, включая ошибку эксперимента. Указанный каталог результатов smoke не должен существовать заранее. `-ExecutionPolicy Bypass` действует только для запускаемого процесса PowerShell. Фактические результаты и открытые критерии находятся в [первом журнале](native-validation.ru.md) и [исследовании часов](clock-investigation.ru.md).
 
 Нужно различать два каталога сохранений. Помощник направляет writable paths движка `CCFileUtils` в `.tools/runtime/sandbox-saves`. Geode независимо получает save root из имени executable: обычно `%LOCALAPPDATA%\AXIOMSandbox`. Поэтому записи мода обычно находятся в `%LOCALAPPDATA%\AXIOMSandbox\geode\mods\axiom.native-capture\captures`, а исходный реплей — в соседнем `replay.json`. Если создать AppData-каталог не удалось, Geode использует каталог executable; фактический путь нужно проверить в runtime, а не предполагать. [Фиксированная реализация Windows save root](https://github.com/geode-sdk/geode/blob/2a5fd87433da47d6bf07221774f0cbb25535ae08/loader/src/platform/windows/util.cpp), [путь сохранений мода](https://github.com/geode-sdk/geode/blob/2a5fd87433da47d6bf07221774f0cbb25535ae08/loader/src/loader/ModImpl.cpp)
 
@@ -88,12 +89,23 @@ Smoke-скрипт требует исполнения всего расписа
 |---|---|
 | Время input hook | Когда адаптер наблюдает доставку запроса в определённую функцию игры |
 | Индекс обработки команд | Порядковый номер вызова с сохранёнными `dt` и half/last-флагами |
+| Обновления игры и Scheduler | Парные вход/выход, вложенность, исходный и переданный `dt`, границы команд и флаги нативной фазы |
 | Сумма исходных callback `dt` | Сумма переданных аргументов; её смысл как simulation time независимо не установлен |
 | Монотонное время компьютера | Продолжительность записи и затраты на сбор данных |
 | Время отображения кадра | Неизвестно без отдельного наблюдения |
 | Аппаратное поступление и device-to-photon latency | Неизвестны без отдельного измерительного метода |
 
 В [фиксированных bindings 2.2081](https://github.com/geode-sdk/bindings/blob/2a8b5c489ce8b49e7061b0543aa2bc5b22570063/bindings/2.2081/GeometryDash.bro) есть `handleButton(bool down, int button, bool isPlayer1)` и `processCommands(float dt, bool isHalfTick, bool isLastTick)`. Вызов обработки команд не равен автоматически визуальному кадру или физическому тику частоты 240 Гц. Значение `true` у `isPlayer1` обозначает первого игрока. Порядок событий, флаги и стадия наблюдения/ввода должны сохраняться.
+
+Аргумент запуска `--geode:axiom.native-capture.clock-policy=<policy>` выбирает явный режим часов:
+
+| Режим | Аргумент оригинального обновления |
+|---|---|
+| `native` (по умолчанию) | Исходное значение без изменения |
+| `fixed-base-60` | Float32 `1/60` один раз на исходный вызов `GJBaseGameLayer::update` у инициализируемого/текущего PlayLayer |
+| `fixed-scheduler-240` | Float32 `1/240` один раз на исходный вызов `CCScheduler::update` во всём защищённом sandbox-процессе, включая время до начала записи |
+
+Режимы с фиксацией требуют `AXIOMSandbox.exe` и явного sandbox-аргумента. Они меняют условия эксперимента и не устанавливают измеренную частоту реального времени или соответствие обычной игре. Нет аккумулятора, дополнительных update-вызовов, ручного обновления ActionManager, коррекции позиции/вращения или восстановления checkpoint. Manifest сохраняет режим, hook, рациональный шаг и область действия; исходные аргументы и wall cadence остаются наблюдаемыми. Поддержанная тестами область указана в [исследовании часов](clock-investigation.ru.md).
 
 Вызов оригинального input handler не доказывает время аппаратного события и принятие запроса последующими стадиями игры. Если принятие, отклонение и буферизация отдельно не наблюдаются, запись обозначается как доставленный в hook ввод. События реплея не являются человеческими наблюдениями.
 
@@ -132,9 +144,11 @@ Smoke-скрипт требует исполнения всего расписа
 
 ## Формат записи и сравнение
 
-Нативная запись имеет schema 1, `kind: native_capture`; один файл содержит одну `attempt`. Происхождение объявляется как `native-engine-capture` с `independently_verified: false`: JSON parser не удостоверяет происхождение записи. Level hash обозначает точные байты `GJGameLevel::m_levelString`, а не восстановленную геометрию столкновений. Source-tree digest коллектора обозначает скомпилированные native sources, CMake и manifest мода, даже если commit старше локальных изменений. Среда имеет хеш компактного UTF-8 JSON с рекурсивно отсортированными ключами и `configuration_complete: false`. Поля игрока отмечены `state_completeness: selected_fields_only`; это не восстанавливаемый snapshot.
+Текущая нативная запись имеет schema 2, `kind: native_capture`; один файл содержит одну `attempt`. Inspector также принимает schema 1, сохраняя отсутствие новых update/phase-наблюдений; у старых input policy отсутствующий поток blocked requests явно отмечается как незаписанный. Происхождение объявляется как `native-engine-capture` с `independently_verified: false`: JSON parser не удостоверяет происхождение записи. Level hash обозначает точные байты `GJGameLevel::m_levelString`, а не восстановленную геометрию столкновений. Source-tree digest коллектора обозначает скомпилированные native sources, CMake и manifest мода, даже если commit старше локальных изменений. Среда имеет хеш компактного UTF-8 JSON с рекурсивно отсортированными ключами и `configuration_complete: false`. Поля игрока отмечены `state_completeness: selected_fields_only`; это не восстанавливаемый snapshot.
 
-Trace начинается с command index 0 после инициализации/сброса, затем сохраняет непрерывные вызовы обработки команд с `dt_seconds`, `is_half_tick` и `is_last_tick`. Начальный timing равен нулю. Индекс увеличивается до оригинального callback, обычные sampled states записываются после него. Terminal snapshot из `levelComplete`/`destroyPlayer` сохраняется отдельно: он может отличаться от последнего post-processing sample и сравнивается отдельно. Если terminal возникает внутри обработки команд, экспорт ждёт записи post-call trace.
+Trace начинается с command index 0 после инициализации/сброса, затем сохраняет непрерывные вызовы обработки команд с `dt_seconds`, `is_half_tick` и `is_last_tick`. Начальный timing равен нулю. Индекс увеличивается до оригинального callback, обычные sampled states записываются после него. Terminal snapshot из `levelComplete`/`destroyPlayer` сохраняется отдельно: он может отличаться от последнего post-processing sample и сравнивается отдельно. Экспорт ждёт возврата из охватывающих command/update/Scheduler/ending-phase hooks.
+
+Schema 2 добавляет `attempt.updates`, `attempt.scheduler_updates` и `attempt.phase_events`. Парные update-записи сохраняют границы команд, вложенность, исходный/переданный `dt`, исходные флаги ending/completion и wall timestamps. Trace и terminal сохраняют sequence охватывающих update/Scheduler; для вызова, уже начатого к моменту записи, принадлежность неизвестна. Парные наблюдения `PlayLayer::playEndAnimationToPos` задают нативный переход к завершающей анимации без предположений по проценту или координате. Лимиты: 20 000 команд, 20 000 записей на каждый update-поток, 256 phase events и 16 MiB на исходный файл. Отсутствующие/усечённые записи аннулируют доказательство terminal.
 
 Доставленные `inputs` сохраняют запрос в `handleButton` и наблюдаемые callback-фазы push/release игрока, включая native return value, когда он доступен. Sources различают observed/replay; происхождение attempt — unknown/replay. Наблюдаемая доставка не доказывает человеческое авторство. Отдельный `attempt.blocked_inputs` присутствует всегда и пуст для observation capture. Каждый blocked diagnostic имеет собственную непрерывную sequence, command index, player, исходный signed-int32 button, pressed state, `source: unknown` и монотонный wall timestamp. Delivered phase и native return отсутствуют: оригинальный handler не вызывается. Доставленные и заблокированные записи делят лимит 12 000 records. Начало различает `level_start`, `practice`, `start_position` и `unknown`. Указатель второго игрока может существовать при его неактивности; активность не записывается, поэтому одни эти поля не переопределяют native terminal callback.
 
@@ -147,7 +161,7 @@ axiom native 'C:\local-evidence\capture-a.json' --json .\reports\native\inspecti
 axiom native-compare 'C:\local-evidence\replay-a.json' 'C:\local-evidence\replay-b.json' --json .\reports\native\comparison.json
 ```
 
-Текущее сравнение требует точного равенства исходных callback arguments, выбранных состояний, доставленных input phases/order/native return values, расписания и положения/состояния terminal. Различия blocked requests сообщаются отдельно и не определяют согласованность доставленного выбранного набора. Диагностические input wall timestamps и terminal wall duration исключены. Поэтому равенство набора не утверждает равенство всего потока запросов. Сумму callback `dt` нельзя назвать проверенным simulation time. Aborted/error и неполные записи отклоняются как доказательство terminal; их файлы и журналы нужно сохранять как неудачные попытки.
+Сравнение требует точного равенства исходных аргументов command callbacks, выбранных состояний с вращением, доставленных input phases/order/native return values, расписания, положения/состояния terminal, нативных фаз, update contexts, переданных update/Scheduler records и phase events. Исходные входящие update-аргументы и wall timestamps сохраняются отдельной диагностикой; переданные значения участвуют в проверке равенства. В режиме `native` переданное равно исходному, поэтому его переменные аргументы тоже сравниваются. Различия blocked requests сообщаются отдельно. Равенство набора не устанавливает побайтовое равенство файлов или всего потока запросов. `pre_end_animation_diagnostics` использует настоящую записанную границу native callback; совпадение префикса не отменяет расхождение полного запуска. Сумму callback `dt` нельзя назвать проверенным simulation time. Aborted/error и неполные записи отклоняются как доказательство terminal; их файлы и журналы нужно сохранять как неудачные попытки.
 
 ## Проверяемый первый checkpoint
 
