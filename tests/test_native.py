@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import struct
 from copy import deepcopy
 
 import pytest
@@ -131,6 +132,72 @@ def capture(*, attempt_id="synthetic-attempt-1", replay=True, outcome="completed
         },
         "limitations": ["SYNTHETIC TEST FIXTURE", "Selected player fields only, no full-state proof"],
     }
+
+
+def rich_capture(*, attempt_id="synthetic-attempt-1", policy="native"):
+    data = capture(attempt_id=attempt_id)
+    data["schema_version"] = 2
+    hooks = {
+        "native": "none",
+        "fixed-base-60": "GJBaseGameLayer::update",
+        "fixed-scheduler-240": "CCScheduler::update",
+    }
+    denominator = {"native": 1, "fixed-base-60": 60, "fixed-scheduler-240": 240}[policy]
+    data["environment"]["clocks"].update(
+        clock_policy=policy,
+        intervention_hook=hooks[policy],
+        step_numerator=0 if policy == "native" else 1,
+        step_denominator=denominator,
+        intervention_scope="guarded-sandbox-process",
+        update_unit="GJBaseGameLayer::update_call_index",
+        scheduler_unit="CCScheduler::update_call_index",
+    )
+    refresh_environment(data)
+    before = {"level_end_animation_started": False, "has_completed_level": False}
+    transition = {"level_end_animation_started": True, "has_completed_level": False}
+    completed = {"level_end_animation_started": True, "has_completed_level": True}
+    for index, row in enumerate(data["attempt"]["trace"]):
+        row.update(
+            phase=deepcopy(completed if index == 2 else before),
+            update_sequence=0 if index else None,
+            scheduler_sequence=0 if index else None,
+        )
+    data["attempt"]["terminal"].update(phase=deepcopy(completed), update_sequence=0, scheduler_sequence=0)
+    fixed = struct.unpack("f", struct.pack("f", 1 / denominator))[0]
+    update = {
+        "sequence": 0,
+        "parent_sequence": None,
+        "original_dt_seconds": 0.02,
+        "delivered_dt_seconds": fixed if policy == "fixed-base-60" else 0.02,
+        "command_index_before": 0,
+        "command_index_after": 2,
+        "phase_before": deepcopy(before),
+        "phase_after": deepcopy(completed),
+        "wall_enter_ns": 0,
+        "wall_exit_ns": 21_000_000,
+        "scheduler_sequence": 0,
+    }
+    scheduler = {key: value for key, value in deepcopy(update).items() if key != "scheduler_sequence"}
+    scheduler["delivered_dt_seconds"] = fixed if policy == "fixed-scheduler-240" else 0.02
+    scheduler["wall_exit_ns"] = 22_000_000
+    data["attempt"].update(
+        updates=[update],
+        scheduler_updates=[scheduler],
+        phase_events=[
+            {
+                "sequence": 0,
+                "event": "PlayLayer::playEndAnimationToPos",
+                "command_index": 2,
+                "update_sequence": 0,
+                "scheduler_sequence": 0,
+                "phase_before": deepcopy(before),
+                "phase_after": transition,
+                "wall_enter_ns": 1_500_000,
+                "wall_exit_ns": 1_600_000,
+            }
+        ],
+    )
+    return data
 
 
 def save(tmp_path, document, filename="capture.json"):
@@ -590,13 +657,35 @@ def test_input_limit_is_shared_with_blocked_diagnostics(tmp_path, blocked_count,
             inspect(tmp_path, data)
 
 
-def test_old_input_policy_cannot_be_mislabeled_as_owned_channel_capture(tmp_path):
+def test_legacy_input_policy_can_be_inspected_without_claiming_owned_channel(tmp_path):
     data = capture()
     data["environment"]["input_policy"] = "process-commands-pre-hook-v1"
     data["challenge"]["input_policy"] = data["environment"]["input_policy"]
+    data["attempt"].pop("blocked_inputs")
     refresh_environment(data)
-    with pytest.raises(ValueError, match="owned-input"):
+    report = inspect(tmp_path, data)
+    assert report["capture_schema_version"] == 1
+    assert report["blocked_input_diagnostics"]["status"] == "not_recorded_legacy_policy"
+    assert report["blocked_input_diagnostics"]["delivery_status"] == "not_recorded"
+    assert any("legacy input policy" in warning for warning in report["warnings"])
+    data["attempt"]["blocked_inputs"] = []
+    with pytest.raises(ValueError, match="unknown blocked_inputs"):
         inspect(tmp_path, data)
+
+
+def test_legacy_comparison_cannot_invent_absent_diagnostics(tmp_path):
+    first = capture()
+    first["environment"]["input_policy"] = "process-commands-pre-hook-v1"
+    first["challenge"]["input_policy"] = first["environment"]["input_policy"]
+    first["attempt"].pop("blocked_inputs")
+    refresh_environment(first)
+    second = deepcopy(first)
+    second["attempt"]["id"] = "other"
+    report = compare(tmp_path, first, second)
+    assert report["status"] == "recorded_subset_consistent"
+    assert report["blocked_input_diagnostics"]["status"] == "not_recorded_legacy_policy"
+    assert report["blocked_input_diagnostics"]["delivery_status"] == "not_recorded"
+    assert any("legacy input policy" in warning for warning in report["warnings"])
 
 
 @pytest.mark.parametrize(
@@ -703,3 +792,218 @@ def test_native_input_return_difference_still_fails_when_other_components_match(
     assert row["terminal_callback_and_placement_equal"] is True
     assert row["terminal_player_fields_equal"] is True
     assert row["consistent"] is False
+
+
+@pytest.mark.parametrize("policy", ["native", "fixed-base-60", "fixed-scheduler-240"])
+def test_schema2_inspection_records_clock_phase_and_paired_cadence(tmp_path, policy):
+    data = rich_capture(policy=policy)
+    report = inspect(tmp_path, data)
+    assert report["capture_schema_version"] == 2
+    observations = report["native_cadence_observations"]
+    assert observations["status"] == "recorded"
+    assert observations["clock_identity"]["clock_policy"] == policy
+    assert observations["original_dt_and_wall_cadence"] == "diagnostic_only"
+    assert observations["render_cadence"] == "not_captured"
+    assert observations["updates"] == data["attempt"]["updates"]
+    assert observations["scheduler_updates"] == data["attempt"]["scheduler_updates"]
+    assert report["terminal"]["phase"]["has_completed_level"] is True
+    assert report["m1_gate"] == "not_established_by_file_inspection"
+    assert not any(key in report["attempt"] for key in ("updates", "scheduler_updates", "phase_events"))
+
+
+def test_schema1_phase_prefix_is_unavailable_instead_of_guessed(tmp_path):
+    report = compare(tmp_path, capture(), capture(attempt_id="other"))
+    assert report["comparisons"][0]["pre_end_animation_diagnostics"]["status"] == "not_recorded_schema1"
+    assert inspect(tmp_path, capture())["native_cadence_observations"]["status"] == "not_recorded_schema1"
+
+
+def test_schema2_matching_prefix_never_greenlights_differing_full_rotation(tmp_path):
+    first = rich_capture()
+    second = rich_capture(attempt_id="other")
+    second["attempt"]["trace"][2]["state"]["player1"]["rotation"] = 1e-12
+    report = compare(tmp_path, first, second)
+    assert report["status"] == "recorded_subset_inconsistent"
+    prefix = report["comparisons"][0]["pre_end_animation_diagnostics"]
+    assert prefix["status"] == "available"
+    assert prefix["consistent"] is True
+    assert prefix["full_comparison_influence"] == "none"
+    assert prefix["m1_gate"] == "not_established_by_prefix_comparison"
+    assert prefix["player_field_diagnostics"]["baseline_record_count"] == 2
+
+
+def test_schema2_original_fixed_clock_dt_is_explicitly_diagnostic_not_silent(tmp_path):
+    first = rich_capture(policy="fixed-base-60")
+    second = rich_capture(policy="fixed-base-60", attempt_id="other")
+    second["attempt"]["updates"][0]["original_dt_seconds"] = 0.03
+    second["attempt"]["updates"][0]["wall_exit_ns"] += 1000
+    report = compare(tmp_path, first, second)
+    assert report["status"] == "recorded_subset_consistent"
+    rich = report["comparisons"][0]["rich_observation_diagnostics"]
+    assert rich["update_records"]["equal"] is True
+    diagnostics = rich["original_cadence_diagnostics"]["updates"]
+    assert diagnostics["original_dt"]["equal"] is False
+    assert diagnostics["original_dt"]["first_difference"]["compared"] == {"original_dt_seconds": 0.03}
+    assert diagnostics["wall_cadence"]["equal"] is False
+    assert diagnostics["comparison_influence"] == "excluded_original_dt_and_wall_cadence"
+
+
+def test_schema2_delivered_cadence_difference_still_fails_full_comparison(tmp_path):
+    first = rich_capture()
+    second = rich_capture(attempt_id="other")
+    second["attempt"]["updates"][0].update(original_dt_seconds=0.03, delivered_dt_seconds=0.03)
+    report = compare(tmp_path, first, second)
+    assert report["status"] == "recorded_subset_inconsistent"
+    assert report["component_consistency"]["delivered_update_records_equal"] is False
+    assert report["comparisons"][0]["rich_observation_diagnostics"]["update_records"]["equal"] is False
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d["environment"]["clocks"].update(step_denominator=60.0),
+        lambda d: d["environment"]["clocks"].update(step_numerator=True),
+        lambda d: d["environment"]["clocks"].update(intervention_hook="CCScheduler::update"),
+        lambda d: d["environment"]["clocks"].update(intervention_scope="ordinary-game"),
+        lambda d: d["attempt"].pop("phase_events"),
+        lambda d: d["attempt"]["trace"][1]["phase"].update(has_completed_level=1),
+        lambda d: d["attempt"]["trace"][0].update(update_sequence=0),
+        lambda d: d["attempt"]["trace"][1].update(scheduler_sequence=1),
+        lambda d: d["attempt"]["updates"][0].update(sequence=1),
+        lambda d: d["attempt"]["updates"][0].update(parent_sequence=0),
+        lambda d: d["attempt"]["updates"][0].update(command_index_after=3),
+        lambda d: d["attempt"]["updates"][0].update(wall_exit_ns=-1),
+        lambda d: d["attempt"]["updates"][0].update(delivered_dt_seconds=1 / 60),
+        lambda d: d["attempt"]["scheduler_updates"][0].update(wall_exit_ns=20_500_000),
+        lambda d: d["attempt"]["terminal"].update(update_sequence=1),
+        lambda d: d["attempt"]["phase_events"][0].update(event="guessed-finish"),
+        lambda d: d["attempt"]["phase_events"][0].update(sequence=1),
+        lambda d: d["attempt"]["phase_events"][0].update(wall_enter_ns=23_000_000, wall_exit_ns=24_000_000),
+    ],
+)
+def test_schema2_malformed_clock_context_phase_and_partial_pairs_rejected(tmp_path, change):
+    data = rich_capture(policy="fixed-base-60")
+    change(data)
+    refresh_environment(data)
+    with pytest.raises(ValueError):
+        inspect(tmp_path, data)
+
+
+@pytest.mark.parametrize("kind", ["missing", "revert", "early", "multiple"])
+def test_schema2_prefix_requires_unique_recorded_phase_transition(tmp_path, kind):
+    first = rich_capture()
+    second = rich_capture(attempt_id="other")
+    for data in (first, second):
+        if kind == "missing":
+            data["attempt"]["phase_events"] = []
+        elif kind == "revert":
+            data["attempt"]["trace"][2]["phase"]["level_end_animation_started"] = False
+        elif kind == "early":
+            data["attempt"]["trace"][0]["phase"]["level_end_animation_started"] = True
+        else:
+            event = deepcopy(data["attempt"]["phase_events"][0])
+            event["sequence"] = 1
+            data["attempt"]["phase_events"].append(event)
+    report = compare(tmp_path, first, second)
+    assert report["status"] == "recorded_subset_consistent"
+    prefix = report["comparisons"][0]["pre_end_animation_diagnostics"]
+    assert prefix["status"] == "not_available"
+    assert prefix["full_comparison_influence"] == "none"
+
+
+def test_schema2_different_boundary_and_early_flags_remain_strict(tmp_path):
+    first = rich_capture()
+    second = rich_capture(attempt_id="other")
+    second["attempt"]["phase_events"][0]["command_index"] = 1
+    second["attempt"]["trace"][1]["phase"]["level_end_animation_started"] = True
+    report = compare(tmp_path, first, second)
+    assert report["status"] == "recorded_subset_inconsistent"
+    assert report["component_consistency"]["recorded_native_phase_equal"] is False
+    assert report["component_consistency"]["native_phase_events_equal"] is False
+    prefix = report["comparisons"][0]["pre_end_animation_diagnostics"]
+    assert prefix["status"] == "available"
+    assert prefix["boundary_equal"] is False
+    assert prefix["consistent"] is False
+    assert prefix["call_argument_diagnostics"]["unmatched_record_count"] == 1
+
+
+def test_schema2_recursive_paired_updates_and_terminal_before_outer_exit_are_valid(tmp_path):
+    data = rich_capture()
+    child = deepcopy(data["attempt"]["updates"][0])
+    child.update(sequence=1, parent_sequence=0, wall_enter_ns=500_000, wall_exit_ns=20_500_000)
+    data["attempt"]["updates"].append(child)
+    data["attempt"]["trace"][1]["update_sequence"] = 1
+    data["attempt"]["trace"][2]["update_sequence"] = 1
+    data["attempt"]["terminal"]["update_sequence"] = 1
+    assert inspect(tmp_path, data)["native_cadence_observations"]["updates"][1]["parent_sequence"] == 0
+    child["wall_exit_ns"] = 22_000_000
+    with pytest.raises(ValueError, match="outside its parent"):
+        inspect(tmp_path, data)
+
+
+def test_schema2_versions_and_clock_interventions_cannot_be_pooled(tmp_path):
+    with pytest.raises(ValueError, match="schema_version"):
+        compare(tmp_path, capture(), rich_capture(attempt_id="other"))
+    with pytest.raises(ValueError, match="Incompatible"):
+        compare(
+            tmp_path,
+            rich_capture(policy="fixed-base-60"),
+            rich_capture(policy="fixed-scheduler-240", attempt_id="other"),
+        )
+
+
+def test_schema2_cli_roundtrip_and_clock_identity_rejection(tmp_path, capsys):
+    first = save(tmp_path, rich_capture(policy="fixed-scheduler-240"), "first.json")
+    second = save(tmp_path, rich_capture(policy="fixed-scheduler-240", attempt_id="other"), "second.json")
+    assert main(["native", str(first)]) == 0
+    inspected = json.loads(capsys.readouterr().out)
+    assert inspected["capture_schema_version"] == 2
+    assert inspected["native_cadence_observations"]["clock_identity"]["clock_policy"] == "fixed-scheduler-240"
+    output = tmp_path / "rich-comparison.json"
+    assert main(["native-compare", str(first), str(second), "--json", str(output)]) == 0
+    compared = json.loads(output.read_text())
+    assert compared["status"] == "recorded_subset_consistent"
+    assert compared["component_consistency"]["delivered_scheduler_records_equal"] is True
+    assert compared["comparisons"][0]["pre_end_animation_diagnostics"]["consistent"] is True
+    assert compared["m1_gate"] == "not_established_by_file_inspection"
+    third = save(tmp_path, rich_capture(policy="fixed-base-60", attempt_id="third"), "third.json")
+    assert main(["native-compare", str(first), str(third)]) == 2
+    assert "Incompatible" in capsys.readouterr().err
+
+
+def test_schema2_sibling_overlap_and_false_trace_membership_rejected(tmp_path):
+    data = rich_capture()
+    first_child = deepcopy(data["attempt"]["updates"][0])
+    first_child.update(
+        sequence=1, parent_sequence=0, wall_enter_ns=500_000, wall_exit_ns=10_000_000, command_index_after=1
+    )
+    second_child = deepcopy(first_child)
+    second_child.update(
+        sequence=2,
+        wall_enter_ns=500_001,
+        wall_exit_ns=20_500_000,
+        command_index_before=1,
+        command_index_after=2,
+    )
+    data["attempt"]["updates"].extend([first_child, second_child])
+    with pytest.raises(ValueError, match="sibling records overlap"):
+        inspect(tmp_path, data)
+    data = rich_capture()
+    child = deepcopy(data["attempt"]["updates"][0])
+    child.update(
+        sequence=1, parent_sequence=0, wall_enter_ns=500_000, wall_exit_ns=20_500_000, command_index_before=1
+    )
+    data["attempt"]["updates"].append(child)
+    data["attempt"]["trace"][1]["update_sequence"] = 1
+    with pytest.raises(ValueError, match="must follow the entry counter"):
+        inspect(tmp_path, data)
+
+
+def test_schema2_capture_begun_inside_unrecorded_outer_context_does_not_invent_membership(tmp_path):
+    data = rich_capture()
+    data["attempt"]["updates"][0]["scheduler_sequence"] = None
+    data["attempt"]["scheduler_updates"] = []
+    for row in [*data["attempt"]["trace"], data["attempt"]["terminal"], *data["attempt"]["phase_events"]]:
+        row["scheduler_sequence"] = None
+    report = inspect(tmp_path, data)
+    assert report["terminal"]["scheduler_sequence"] is None
+    assert report["native_cadence_observations"]["scheduler_updates"] == []

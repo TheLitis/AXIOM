@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import struct
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -17,8 +18,12 @@ MAX_TRACE_RECORDS = 20_001
 MAX_INPUT_RECORDS = 12_000
 MAX_PLANNED_INPUTS = 4_000
 MAX_COMPARISON_FILES = 16
+MAX_UPDATE_RECORDS = 20_000
+MAX_PHASE_EVENTS = 256
 INPUT_POLICY = "process-commands-pre-hook-owned-input-v1"
+LEGACY_INPUT_POLICY = "process-commands-pre-hook-v1"
 PLAYER_FIELDS = frozenset({"x", "y", "y_velocity", "rotation", "is_dead", "mode"})
+PHASE_FIELDS = frozenset({"level_end_animation_started", "has_completed_level"})
 
 
 def canonical_sha256(value: Any) -> str:
@@ -81,6 +86,175 @@ def _player(value: Any, name: str) -> dict:
     return state
 
 
+def _phase(value: Any, name: str) -> dict:
+    phase = _fields(value, name, PHASE_FIELDS)
+    for key, value in phase.items():
+        _bool(value, f"{name}.{key}")
+    return phase
+
+
+def _context_id(value: Any, name: str, records: list[dict]) -> int | None:
+    return None if value is None else _int(value, name, maximum=len(records) - 1)
+
+
+def _float32(value: float) -> float:
+    return struct.unpack("f", struct.pack("f", value))[0]
+
+
+def _validate_update_stream(
+    rows: Any, name: str, terminal_index: int, clocks: dict, scheduler: bool
+) -> list[dict]:
+    if not isinstance(rows, list) or len(rows) > MAX_UPDATE_RECORDS:
+        raise ValueError(f"{name} must contain at most {MAX_UPDATE_RECORDS} paired records")
+    previous_enter = -1
+    previous_before = -1
+    stack: list[int] = []
+    for index, value in enumerate(rows):
+        row = _fields(
+            value,
+            f"{name}[{index}]",
+            {
+                "sequence",
+                "parent_sequence",
+                "original_dt_seconds",
+                "delivered_dt_seconds",
+                "command_index_before",
+                "command_index_after",
+                "phase_before",
+                "phase_after",
+                "wall_enter_ns",
+                "wall_exit_ns",
+            }
+            | (set() if scheduler else {"scheduler_sequence"}),
+        )
+        if _int(row["sequence"], f"{name}.sequence") != index:
+            raise ValueError(f"{name} sequence must start at zero and be contiguous")
+        parent = row["parent_sequence"]
+        if parent is not None:
+            _int(parent, f"{name}.parent_sequence", maximum=index - 1)
+        original = finite(row["original_dt_seconds"], f"{name}.original_dt_seconds", minimum=0, maximum=60)
+        delivered = finite(row["delivered_dt_seconds"], f"{name}.delivered_dt_seconds", minimum=0, maximum=60)
+        intervention = "fixed-scheduler-240" if scheduler else "fixed-base-60"
+        expected = (
+            _float32(1 / clocks["step_denominator"]) if clocks["clock_policy"] == intervention else original
+        )
+        if delivered != expected:
+            raise ValueError(f"{name} delivered dt does not match its declared clock policy")
+        before = _int(row["command_index_before"], f"{name}.command_index_before", maximum=terminal_index)
+        after = _int(
+            row["command_index_after"], f"{name}.command_index_after", minimum=before, maximum=terminal_index
+        )
+        enter = _int(row["wall_enter_ns"], f"{name}.wall_enter_ns")
+        exit_time = _int(row["wall_exit_ns"], f"{name}.wall_exit_ns", minimum=enter)
+        if enter < previous_enter or before < previous_before:
+            raise ValueError(f"{name} entry timestamps and command indices must be nondecreasing")
+        previous_enter, previous_before = enter, before
+        _phase(row["phase_before"], f"{name}.phase_before")
+        _phase(row["phase_after"], f"{name}.phase_after")
+        while stack and stack[-1] != parent:
+            completed = rows[stack.pop()]
+            if completed["wall_exit_ns"] > enter or completed["command_index_after"] > before:
+                raise ValueError(f"{name} sibling records overlap or parent nesting is inconsistent")
+        if parent is not None:
+            if not stack:
+                raise ValueError(f"{name} parent does not identify an enclosing entry-order record")
+            enclosing = rows[parent]
+            if (
+                enter < enclosing["wall_enter_ns"]
+                or exit_time > enclosing["wall_exit_ns"]
+                or before < enclosing["command_index_before"]
+                or after > enclosing["command_index_after"]
+            ):
+                raise ValueError(f"{name} child interval is outside its parent")
+        stack.append(index)
+    return rows
+
+
+def _validate_rich_observations(attempt: dict, clocks: dict, terminal_wall: float) -> None:
+    terminal = attempt["terminal"]
+    updates = _validate_update_stream(attempt["updates"], "updates", terminal["command_index"], clocks, False)
+    schedulers = _validate_update_stream(
+        attempt["scheduler_updates"], "scheduler_updates", terminal["command_index"], clocks, True
+    )
+    for row in updates:
+        scheduler = _context_id(row["scheduler_sequence"], "update.scheduler_sequence", schedulers)
+        if scheduler is not None:
+            enclosing = schedulers[scheduler]
+            if (
+                row["wall_enter_ns"] < enclosing["wall_enter_ns"]
+                or row["wall_exit_ns"] > enclosing["wall_exit_ns"]
+                or row["command_index_before"] < enclosing["command_index_before"]
+                or row["command_index_after"] > enclosing["command_index_after"]
+            ):
+                raise ValueError("Update interval is outside its declared scheduler context")
+    for row in [*attempt["trace"], terminal]:
+        _phase(row["phase"], "native phase")
+        for key, records in (("update_sequence", updates), ("scheduler_sequence", schedulers)):
+            context = _context_id(row[key], key, records)
+            if context is not None:
+                enclosing = records[context]
+                if (
+                    not enclosing["command_index_before"]
+                    <= row["command_index"]
+                    <= enclosing["command_index_after"]
+                ):
+                    raise ValueError("Recorded command is outside its declared native update context")
+                if row is not terminal and row["command_index"] <= enclosing["command_index_before"]:
+                    raise ValueError("Trace call must follow the entry counter of its recorded native update")
+                if (
+                    row is terminal
+                    and not enclosing["wall_enter_ns"]
+                    <= (terminal_wall + 1e-6) * 1e9
+                    <= enclosing["wall_exit_ns"] + 1e3
+                ):
+                    raise ValueError("Terminal callback timestamp is outside its enclosing native update")
+    initial = attempt["trace"][0]
+    if initial["update_sequence"] is not None or initial["scheduler_sequence"] is not None:
+        raise ValueError("Initial native trace must not invent a recorded enclosing update context")
+    events = attempt["phase_events"]
+    if not isinstance(events, list) or len(events) > MAX_PHASE_EVENTS:
+        raise ValueError(f"phase_events must contain at most {MAX_PHASE_EVENTS} records")
+    previous_call, previous_enter = -1, -1
+    for index, value in enumerate(events):
+        event = _fields(
+            value,
+            f"phase_events[{index}]",
+            {
+                "sequence",
+                "event",
+                "command_index",
+                "update_sequence",
+                "scheduler_sequence",
+                "phase_before",
+                "phase_after",
+                "wall_enter_ns",
+                "wall_exit_ns",
+            },
+        )
+        if _int(event["sequence"], "phase_event.sequence") != index:
+            raise ValueError("Phase event sequence must start at zero and be contiguous")
+        if event["event"] != "PlayLayer::playEndAnimationToPos":
+            raise ValueError("Unsupported native phase event")
+        command = _int(event["command_index"], "phase_event.command_index", maximum=terminal["command_index"])
+        enter = _int(event["wall_enter_ns"], "phase_event.wall_enter_ns")
+        exit_time = _int(event["wall_exit_ns"], "phase_event.wall_exit_ns", minimum=enter)
+        if command < previous_call or enter < previous_enter:
+            raise ValueError("Phase event call indices and entry timestamps must be nondecreasing")
+        previous_call, previous_enter = command, enter
+        _phase(event["phase_before"], "phase_event.phase_before")
+        _phase(event["phase_after"], "phase_event.phase_after")
+        for key, records in (("update_sequence", updates), ("scheduler_sequence", schedulers)):
+            context = _context_id(event[key], f"phase_event.{key}", records)
+            if context is not None:
+                enclosing = records[context]
+                if (
+                    not enclosing["command_index_before"] <= command <= enclosing["command_index_after"]
+                    or enter < enclosing["wall_enter_ns"]
+                    or exit_time > enclosing["wall_exit_ns"]
+                ):
+                    raise ValueError("Phase event is outside its recorded enclosing context")
+
+
 def _load(path: str | Path) -> tuple[dict, str]:
     capture, source_sha256 = read_json(path)
     _fields(
@@ -100,8 +274,9 @@ def _load(path: str | Path) -> tuple[dict, str]:
             "state_fields",
         },
     )
-    if type(capture["schema_version"]) is not int or capture["schema_version"] != 1:
-        raise ValueError("native capture schema_version must be integer 1")
+    if type(capture["schema_version"]) is not int or capture["schema_version"] not in {1, 2}:
+        raise ValueError("native capture schema_version must be integer 1 or 2")
+    rich = capture["schema_version"] == 2
     if capture["kind"] != "native_capture":
         raise ValueError("Expected kind native_capture")
     provenance = _fields(
@@ -163,8 +338,10 @@ def _load(path: str | Path) -> tuple[dict, str]:
         _text(environment[key], f"environment.{key}")
     if environment["platform"] != "windows-x64":
         raise ValueError("Only the windows-x64 native capture contract is supported")
-    if environment["input_policy"] != INPUT_POLICY:
-        raise ValueError(f"Native capture input_policy must be {INPUT_POLICY}")
+    if environment["input_policy"] not in {INPUT_POLICY, LEGACY_INPUT_POLICY}:
+        raise ValueError("Unsupported native capture input_policy")
+    if rich and environment["input_policy"] != INPUT_POLICY:
+        raise ValueError("Schema 2 requires the owned native input policy")
     _bool(environment["configuration_complete"], "environment.configuration_complete")
     clocks = _fields(
         environment["clocks"],
@@ -174,7 +351,20 @@ def _load(path: str | Path) -> tuple[dict, str]:
             "dt_unit",
             "hardware_arrival",
             "render_cadence",
-        },
+        }
+        | (
+            {
+                "clock_policy",
+                "intervention_hook",
+                "step_numerator",
+                "step_denominator",
+                "intervention_scope",
+                "update_unit",
+                "scheduler_unit",
+            }
+            if rich
+            else set()
+        ),
     )
     expected_clocks = {
         "unit": "processCommands_call_index",
@@ -182,6 +372,39 @@ def _load(path: str | Path) -> tuple[dict, str]:
         "hardware_arrival": "unknown",
         "render_cadence": "not_captured",
     }
+    if rich:
+        policy = clocks["clock_policy"]
+        policies = {
+            "native": ("none", 0, 1),
+            "fixed-base-60": ("GJBaseGameLayer::update", 1, 60),
+            "fixed-scheduler-240": ("CCScheduler::update", 1, 240),
+        }
+        if not isinstance(policy, str) or policy not in policies:
+            raise ValueError("Unsupported native clock policy")
+        hook, numerator, denominator = policies[policy]
+        if (
+            clocks["intervention_hook"] != hook
+            or _int(clocks["step_numerator"], "step_numerator") != numerator
+            or _int(clocks["step_denominator"], "step_denominator", minimum=1) != denominator
+            or clocks["intervention_scope"] != "guarded-sandbox-process"
+            or clocks["update_unit"] != "GJBaseGameLayer::update_call_index"
+            or clocks["scheduler_unit"] != "CCScheduler::update_call_index"
+        ):
+            raise ValueError("Clock intervention identity is inconsistent")
+        expected_clocks.update(
+            {
+                key: clocks[key]
+                for key in (
+                    "clock_policy",
+                    "intervention_hook",
+                    "step_numerator",
+                    "step_denominator",
+                    "intervention_scope",
+                    "update_unit",
+                    "scheduler_unit",
+                )
+            }
+        )
     if clocks != expected_clocks:
         raise ValueError("Clock contract differs from the selected-fields native observer")
     mods = environment["mods"]
@@ -245,10 +468,11 @@ def _load(path: str | Path) -> tuple[dict, str]:
             "replay_sha256",
             "planned_inputs",
             "inputs",
-            "blocked_inputs",
             "trace",
             "terminal",
-        },
+        }
+        | ({"blocked_inputs"} if environment["input_policy"] == INPUT_POLICY else set())
+        | ({"updates", "scheduler_updates", "phase_events"} if rich else set()),
     )
     _text(attempt["id"], "attempt.id")
     if _text(attempt["input_source"], "attempt.input_source") not in {"replay", "unknown"}:
@@ -294,7 +518,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
                 "is_half_tick",
                 "is_last_tick",
                 "state",
-            },
+            }
+            | ({"phase", "update_sequence", "scheduler_sequence"} if rich else set()),
         )
         if _int(row["command_index"], f"trace[{index}].command_index") != index:
             raise ValueError("Native trace call indices must start at zero and be contiguous")
@@ -312,7 +537,7 @@ def _load(path: str | Path) -> tuple[dict, str]:
     inputs = attempt["inputs"]
     if not isinstance(inputs, list) or len(inputs) > MAX_INPUT_RECORDS:
         raise ValueError(f"inputs must contain at most {MAX_INPUT_RECORDS} records")
-    blocked = attempt["blocked_inputs"]
+    blocked = attempt.get("blocked_inputs", [])
     if not isinstance(blocked, list) or len(inputs) + len(blocked) > MAX_INPUT_RECORDS:
         raise ValueError(
             f"inputs and blocked_inputs together must contain at most {MAX_INPUT_RECORDS} records"
@@ -401,7 +626,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
             "command_index",
             "wall_elapsed_seconds",
             "state",
-        },
+        }
+        | ({"phase", "update_sequence", "scheduler_sequence"} if rich else set()),
     )
     if _text(terminal["outcome"], "terminal.outcome") not in {"completed", "died"}:
         raise ValueError("Native terminal evidence requires completed or died, not aborted/error")
@@ -422,6 +648,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
         raise ValueError("Input wall timestamp is after the reported terminal callback")
     if previous_blocked_wall_time > (terminal_wall + 1e-6) * 1_000_000_000:
         raise ValueError("Blocked input wall timestamp is after the reported terminal callback")
+    if rich:
+        _validate_rich_observations(attempt, clocks, terminal_wall)
     terminal_state = _fields(terminal["state"], "terminal.state", {"player1", "player2"})
     _player(terminal_state["player1"], "terminal.state.player1")
     if terminal_state["player2"] is not None:
@@ -471,7 +699,7 @@ def _blocked_signature(capture: dict) -> list[dict]:
     # equality is reported separately, never included in delivered consistency.
     return [
         {key: value for key, value in row.items() if key != "wall_time_ns"}
-        for row in capture["attempt"]["blocked_inputs"]
+        for row in capture["attempt"].get("blocked_inputs", [])
     ]
 
 
@@ -555,6 +783,165 @@ def _terminal_component_diagnostics(baseline: dict, compared: dict) -> dict:
     }
 
 
+def _call_arguments(row: dict) -> dict:
+    return {key: row[key] for key in ("command_index", "dt_seconds", "is_half_tick", "is_last_tick")}
+
+
+def _stream_signature(rows: list[dict], *, update: bool) -> list[dict]:
+    excluded = {"wall_enter_ns", "wall_exit_ns"} | ({"original_dt_seconds"} if update else set())
+    return [{key: value for key, value in row.items() if key not in excluded} for row in rows]
+
+
+def _stream_difference(baseline: list[dict], compared: list[dict]) -> dict:
+    first = next((i for i, (left, right) in enumerate(zip(baseline, compared)) if left != right), None)
+    if first is None and len(baseline) != len(compared):
+        first = min(len(baseline), len(compared))
+    return {
+        "equal": baseline == compared,
+        "baseline_record_count": len(baseline),
+        "compared_record_count": len(compared),
+        "first_difference": None
+        if first is None
+        else {
+            "sequence": first,
+            "baseline": baseline[first] if first < len(baseline) else None,
+            "compared": compared[first] if first < len(compared) else None,
+        },
+    }
+
+
+def _end_boundary(attempt: dict) -> tuple[dict | None, str | None]:
+    transitions = [
+        event
+        for event in attempt["phase_events"]
+        if not event["phase_before"]["level_end_animation_started"]
+        and event["phase_after"]["level_end_animation_started"]
+    ]
+    if len(transitions) != 1:
+        return None, "no_unique_recorded_native_end_animation_transition"
+    boundary = transitions[0]
+    command = boundary["command_index"]
+    if command == 0:
+        return boundary, "no_recorded_trace_prefix_before_transition"
+    if any(row["phase"]["level_end_animation_started"] for row in attempt["trace"][:command]):
+        return boundary, "end_animation_flag_already_present_before_recorded_transition"
+    observed = [row["phase"]["level_end_animation_started"] for row in attempt["trace"][command:]]
+    first_true = next((i for i, value in enumerate(observed) if value), None)
+    if first_true is None or not all(observed[first_true:]):
+        return boundary, "recorded_end_animation_flag_missing_or_reverting_after_transition"
+    if first_true > 1:
+        return boundary, "recorded_end_animation_flag_delayed_after_transition"
+    return boundary, None
+
+
+def _pre_end_comparison(baseline: dict, compared: dict) -> dict:
+    if baseline["schema_version"] != 2:
+        return {"status": "not_recorded_schema1", "full_comparison_influence": "none"}
+    left, left_reason = _end_boundary(baseline["attempt"])
+    right, right_reason = _end_boundary(compared["attempt"])
+    result = {
+        "scope": "trace_rows_with_command_index_strictly_before_recorded_native_end_animation_event",
+        "boundary_event": "PlayLayer::playEndAnimationToPos",
+        "boundary_rule": "one_recorded_false_to_true_level_end_animation_started_transition",
+        "full_comparison_influence": "none",
+        "m1_gate": "not_established_by_prefix_comparison",
+        "baseline_boundary": None if left is None else _stream_signature([left], update=False)[0],
+        "compared_boundary": None if right is None else _stream_signature([right], update=False)[0],
+    }
+    if left_reason or right_reason:
+        return {
+            **result,
+            "status": "not_available",
+            "baseline_reason": left_reason,
+            "compared_reason": right_reason,
+        }
+    left_trace = baseline["attempt"]["trace"][: left["command_index"]]
+    right_trace = compared["attempt"]["trace"][: right["command_index"]]
+    boundary_equal = _stream_signature([left], update=False) == _stream_signature([right], update=False)
+    call_args = _trace_component_diagnostics(
+        [_call_arguments(row) for row in left_trace], [_call_arguments(row) for row in right_trace]
+    )
+    players = _trace_component_diagnostics(
+        [_flat_player_fields(row["state"]) for row in left_trace],
+        [_flat_player_fields(row["state"]) for row in right_trace],
+    )
+    phases = _trace_component_diagnostics(
+        [row["phase"] for row in left_trace], [row["phase"] for row in right_trace]
+    )
+    contexts = _trace_component_diagnostics(
+        [{key: row[key] for key in ("update_sequence", "scheduler_sequence")} for row in left_trace],
+        [{key: row[key] for key in ("update_sequence", "scheduler_sequence")} for row in right_trace],
+    )
+    inputs_equal = [
+        row for row in _input_signature(baseline) if row["command_index"] < left["command_index"]
+    ] == [row for row in _input_signature(compared) if row["command_index"] < right["command_index"]]
+    return {
+        **result,
+        "status": "available",
+        "boundary_equal": boundary_equal,
+        "recorded_inputs_equal": inputs_equal,
+        "call_argument_diagnostics": call_args,
+        "player_field_diagnostics": players,
+        "native_phase_diagnostics": phases,
+        "recorded_context_diagnostics": contexts,
+        "consistent": boundary_equal
+        and inputs_equal
+        and all(item["equal"] for item in (call_args, players, phases, contexts)),
+    }
+
+
+def _rich_comparison(baseline: dict, compared: dict) -> dict:
+    if baseline["schema_version"] != 2:
+        return {"status": "not_recorded_schema1"}
+    a, b = baseline["attempt"], compared["attempt"]
+    phase = _trace_component_diagnostics(
+        [row["phase"] for row in a["trace"]], [row["phase"] for row in b["trace"]]
+    )
+    context = _trace_component_diagnostics(
+        [{key: row[key] for key in ("update_sequence", "scheduler_sequence")} for row in a["trace"]],
+        [{key: row[key] for key in ("update_sequence", "scheduler_sequence")} for row in b["trace"]],
+    )
+    updates = _stream_difference(
+        _stream_signature(a["updates"], update=True), _stream_signature(b["updates"], update=True)
+    )
+    schedulers = _stream_difference(
+        _stream_signature(a["scheduler_updates"], update=True),
+        _stream_signature(b["scheduler_updates"], update=True),
+    )
+    events = _stream_difference(
+        _stream_signature(a["phase_events"], update=False), _stream_signature(b["phase_events"], update=False)
+    )
+    terminal_keys = ("phase", "update_sequence", "scheduler_sequence")
+    terminal_context = {key: a["terminal"][key] for key in terminal_keys} == {
+        key: b["terminal"][key] for key in terminal_keys
+    }
+    original_diagnostics = {}
+    for name in ("updates", "scheduler_updates"):
+        original_diagnostics[name] = {
+            "original_dt": _stream_difference(
+                [{"original_dt_seconds": row["original_dt_seconds"]} for row in a[name]],
+                [{"original_dt_seconds": row["original_dt_seconds"]} for row in b[name]],
+            ),
+            "wall_cadence": _stream_difference(
+                [{key: row[key] for key in ("wall_enter_ns", "wall_exit_ns")} for row in a[name]],
+                [{key: row[key] for key in ("wall_enter_ns", "wall_exit_ns")} for row in b[name]],
+            ),
+            "comparison_influence": "excluded_original_dt_and_wall_cadence",
+        }
+    return {
+        "status": "available",
+        "native_phase_diagnostics": phase,
+        "recorded_context_diagnostics": context,
+        "update_records": updates,
+        "scheduler_records": schedulers,
+        "phase_events": events,
+        "terminal_phase_and_context_equal": terminal_context,
+        "original_cadence_diagnostics": original_diagnostics,
+        "consistent": terminal_context
+        and all(item["equal"] for item in (phase, context, updates, schedulers, events)),
+    }
+
+
 def _summary(capture: dict, source_sha256: str) -> dict:
     warnings = [
         "The supplied file's declared native origin is not authenticated or independently verified.",
@@ -562,6 +949,7 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         "processCommands call indices are not certified physics ticks; dt is the hook argument.",
         "Callback return values do not measure physical input arrival, display latency or human intent.",
         "No human performance, timing windows, difficulty probability or AR is inferred.",
+        "A native phase prefix is diagnostic only and cannot close M1 or replace full recorded-subset comparison.",
     ]
     if capture["provenance"]["origin"] == "synthetic":
         warnings.insert(0, "SYNTHETIC capture fixture, not native Geometry Dash evidence.")
@@ -573,13 +961,17 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         warnings.append("This is not a declared true level start and cannot be full-start terminal evidence.")
     if capture["attempt"]["input_source"] != "replay":
         warnings.append("This is not a controlled source-replay attempt; replay repeatability is not tested.")
-    else:
+    elif capture["environment"]["input_policy"] == INPUT_POLICY:
         warnings.extend(
             [
                 "Replay suppresses unknown-origin non-injector handleButton requests; vanilla-input equivalence is not established.",
                 "Direct PlayerObject push/release calls bypassing handleButton are not controlled by replay channel ownership.",
                 "Blocked inputs were not forwarded; their effect on a counterfactual unsuppressed trajectory is not measured.",
             ]
+        )
+    else:
+        warnings.append(
+            "The legacy input policy does not record owned-channel suppression or blocked-input diagnostics."
         )
     if capture["attempt"]["terminal"]["outcome"] == "completed" and any(
         state is not None and state["is_dead"] for state in capture["attempt"]["terminal"]["state"].values()
@@ -592,6 +984,7 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         "schema_version": 1,
         "kind": "native_capture_inspection",
         "source_sha256": source_sha256,
+        "capture_schema_version": capture["schema_version"],
         "status": "supplied_native_observer_evidence"
         if capture["provenance"]["origin"] == "native-engine-capture"
         else "synthetic_fixture",
@@ -607,12 +1000,22 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         "attempt": {
             key: value
             for key, value in capture["attempt"].items()
-            if key not in {"planned_inputs", "inputs", "blocked_inputs", "trace", "terminal"}
+            if key
+            not in {
+                "planned_inputs",
+                "inputs",
+                "blocked_inputs",
+                "trace",
+                "terminal",
+                "updates",
+                "scheduler_updates",
+                "phase_events",
+            }
         },
         "terminal": capture["attempt"]["terminal"],
         "counts": {
             "input_records": len(capture["attempt"]["inputs"]),
-            "blocked_input_records": len(capture["attempt"]["blocked_inputs"]),
+            "blocked_input_records": len(capture["attempt"].get("blocked_inputs", [])),
             "state_records": len(capture["attempt"]["trace"]),
             "planned_inputs": len(capture["attempt"]["planned_inputs"]),
             "unexecuted_planned_tail": sum(
@@ -625,13 +1028,27 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         else "not_a_controlled_replay",
         "recorded_input_sha256": canonical_sha256(_input_signature(capture)),
         "blocked_input_diagnostics": {
+            "status": "recorded" if "blocked_inputs" in capture["attempt"] else "not_recorded_legacy_policy",
             "source": "unknown",
-            "delivery_status": "not_forwarded_to_native_handleButton",
+            "delivery_status": "not_forwarded_to_native_handleButton"
+            if "blocked_inputs" in capture["attempt"]
+            else "not_recorded",
             "counterfactual_trajectory_effect": "not_measured",
-            "records": capture["attempt"]["blocked_inputs"],
+            "records": capture["attempt"].get("blocked_inputs", []),
             "signature_sha256": canonical_sha256(_blocked_signature(capture)),
         },
         "recorded_state_sha256": canonical_sha256(capture["attempt"]["trace"]),
+        "native_cadence_observations": {"status": "not_recorded_schema1"}
+        if capture["schema_version"] == 1
+        else {
+            "status": "recorded",
+            "clock_identity": capture["environment"]["clocks"],
+            "original_dt_and_wall_cadence": "diagnostic_only",
+            "render_cadence": "not_captured",
+            "updates": capture["attempt"]["updates"],
+            "scheduler_updates": capture["attempt"]["scheduler_updates"],
+            "phase_events": capture["attempt"]["phase_events"],
+        },
         "reported_hook_dt_sum_seconds": sum(row["dt_seconds"] for row in capture["attempt"]["trace"]),
         "limitations": capture["limitations"],
         "warnings": warnings,
@@ -655,7 +1072,14 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
     base = captures[0][0]
     seen_ids: set[str] = set()
     for capture, _ in captures:
-        for key in ("challenge", "environment", "environment_sha256", "collector", "provenance"):
+        for key in (
+            "schema_version",
+            "challenge",
+            "environment",
+            "environment_sha256",
+            "collector",
+            "provenance",
+        ):
             if capture[key] != base[key]:
                 raise ValueError(f"Incompatible capture {key}")
         attempt = capture["attempt"]
@@ -672,7 +1096,7 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
     base_blocked = _blocked_signature(base)
     base_plan = base["attempt"]["planned_inputs"]
     base_trace = base["attempt"]["trace"]
-    base_call_arguments = [{key: value for key, value in row.items() if key != "state"} for row in base_trace]
+    base_call_arguments = [_call_arguments(row) for row in base_trace]
     base_player_fields = [_flat_player_fields(row["state"]) for row in base_trace]
     base_terminal = {
         key: value for key, value in base["attempt"]["terminal"].items() if key != "wall_elapsed_seconds"
@@ -697,7 +1121,7 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
         state_equal = capture_trace == base_trace
         call_arguments = _trace_component_diagnostics(
             base_call_arguments,
-            [{key: value for key, value in row.items() if key != "state"} for row in capture_trace],
+            [_call_arguments(row) for row in capture_trace],
         )
         player_fields = _trace_component_diagnostics(
             base_player_fields, [_flat_player_fields(row["state"]) for row in capture_trace]
@@ -705,6 +1129,7 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
         terminal_components = _terminal_component_diagnostics(
             base["attempt"]["terminal"], capture["attempt"]["terminal"]
         )
+        rich_components = _rich_comparison(base, capture)
         terminal_equal = {
             key: value
             for key, value in capture["attempt"]["terminal"].items()
@@ -743,32 +1168,55 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
                 "terminal_callback_and_placement_equal": terminal_components["callback_and_placement_equal"],
                 "terminal_player_fields_equal": terminal_components["selected_player_fields_equal"],
                 "terminal_diagnostics": terminal_components,
+                "rich_observation_diagnostics": rich_components,
+                "pre_end_animation_diagnostics": _pre_end_comparison(base, capture),
                 "first_different_state_call_index": first_state_difference,
-                "consistent": planned_inputs_equal and inputs_equal and state_equal and terminal_equal,
+                "consistent": planned_inputs_equal
+                and inputs_equal
+                and state_equal
+                and terminal_equal
+                and rich_components.get("consistent", True),
             }
         )
     consistent = all(row["consistent"] for row in comparisons)
+    component_consistency = {
+        key: all(row[key] for row in comparisons)
+        for key in (
+            "planned_inputs_equal",
+            "recorded_inputs_equal",
+            "recorded_call_arguments_equal",
+            "recorded_player_fields_equal",
+            "terminal_callback_and_placement_equal",
+            "terminal_player_fields_equal",
+        )
+    }
+    if base["schema_version"] == 2:
+        for name, nested_key in (
+            ("recorded_native_phase_equal", "native_phase_diagnostics"),
+            ("recorded_update_context_equal", "recorded_context_diagnostics"),
+            ("delivered_update_records_equal", "update_records"),
+            ("delivered_scheduler_records_equal", "scheduler_records"),
+            ("native_phase_events_equal", "phase_events"),
+        ):
+            component_consistency[name] = all(
+                row["rich_observation_diagnostics"][nested_key]["equal"] for row in comparisons
+            )
+        component_consistency["terminal_phase_and_context_equal"] = all(
+            row["rich_observation_diagnostics"]["terminal_phase_and_context_equal"] for row in comparisons
+        )
     return {
         "schema_version": 1,
         "kind": "native_capture_comparison",
         "status": "recorded_subset_consistent" if consistent else "recorded_subset_inconsistent",
         "comparison_rule": "exact_recorded_call_arguments_player_fields_inputs_and_terminal",
-        "component_consistency": {
-            key: all(row[key] for row in comparisons)
-            for key in (
-                "planned_inputs_equal",
-                "recorded_inputs_equal",
-                "recorded_call_arguments_equal",
-                "recorded_player_fields_equal",
-                "terminal_callback_and_placement_equal",
-                "terminal_player_fields_equal",
-            )
-        },
+        "component_consistency": component_consistency,
         "authentication_status": "not_authenticated",
         "physics_status": "not_independently_verified",
         "m1_gate": "not_established_by_file_inspection",
         "complete_state_determinism": "not_established",
         "replay_execution_scope": "planned_prefix_through_native_terminal",
+        "capture_schema_version": base["schema_version"],
+        "clock_identity": base["environment"]["clocks"],
         "challenge": base["challenge"],
         "environment_sha256": base["environment_sha256"],
         "replay_sha256": base["attempt"]["replay_sha256"],
@@ -777,16 +1225,22 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
         "baseline_source_sha256": captures[0][1],
         "blocked_input_diagnostics": {
             "source": "unknown",
-            "delivery_status": "not_forwarded_to_native_handleButton",
+            "delivery_status": "not_forwarded_to_native_handleButton"
+            if "blocked_inputs" in base["attempt"]
+            else "not_recorded",
             "comparison_influence": "excluded_from_recorded_subset_consistency",
             "counterfactual_trajectory_effect": "not_measured",
-            "status": "diagnostic_records_equal"
-            if all(row["blocked_inputs_equal"] for row in comparisons)
-            else "diagnostic_records_different",
+            "status": "not_recorded_legacy_policy"
+            if "blocked_inputs" not in base["attempt"]
+            else (
+                "diagnostic_records_equal"
+                if all(row["blocked_inputs_equal"] for row in comparisons)
+                else "diagnostic_records_different"
+            ),
             "attempts": [
                 {
                     "attempt_id": capture["attempt"]["id"],
-                    "record_count": len(capture["attempt"]["blocked_inputs"]),
+                    "record_count": len(capture["attempt"].get("blocked_inputs", [])),
                     "signature_sha256": canonical_sha256(_blocked_signature(capture)),
                 }
                 for capture, _ in captures
@@ -798,9 +1252,20 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
             "Agreement concerns only selected recorded fields, not full engine determinism or restoration.",
             "Wall timestamps are excluded; reported dt/call sequence and terminal placement are compared exactly.",
             "Call arguments, selected player fields and terminal callback/state are reported separately; all must match exactly, including rotation, for subset consistency.",
-            "Blocked unknown-origin requests were not forwarded and are diagnostic only; differences do not affect delivered subset consistency.",
-            "The effect of suppressed requests on a counterfactual unsuppressed trajectory is not measured; vanilla-input equivalence is unsupported.",
-            "Direct PlayerObject push/release calls bypassing handleButton are outside replay channel control.",
+            "Schema 2 also compares delivered update/scheduler dt, recorded grouping, native phase flags/events and terminal context exactly.",
+            "Original update/scheduler dt and wall cadence are separately reported diagnostics and do not substitute for delivered call arguments.",
+            "Pre-end-animation checks use a recorded native phase transition and never override the full result or establish M1.",
+            *(
+                [
+                    "Blocked unknown-origin requests were not forwarded and are diagnostic only; differences do not affect delivered subset consistency.",
+                    "The effect of suppressed requests on a counterfactual unsuppressed trajectory is not measured; vanilla-input equivalence is unsupported.",
+                    "Direct PlayerObject push/release calls bypassing handleButton are outside replay channel control.",
+                ]
+                if base["environment"]["input_policy"] == INPUT_POLICY
+                else [
+                    "The legacy input policy does not supply owned-channel suppression or blocked-input diagnostics."
+                ]
+            ),
             "No human ability, probability, difficulty window or AR is inferred.",
             *(
                 []

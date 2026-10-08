@@ -1,0 +1,265 @@
+{
+  "schema_version": 2,
+  "kind": "native_capture",
+  "provenance": {
+    "origin": "synthetic",
+    "independently_verified": false,
+    "state_completeness": "selected_fields_only"
+  },
+  "collector": {
+    "id": "synthetic.axiom",
+    "version": "0.1.0",
+    "source_commit": "dddddddddddddddddddddddddddddddddddddddd",
+    "source_tree_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+    "sdk_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "bindings_commit": "ffffffffffffffffffffffffffffffffffffffff"
+  },
+  "environment": {
+    "game_executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "game_version": "2.2081",
+    "geode_version": "5.8.2",
+    "adapter_binary_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "platform": "windows-x64",
+    "mods": [
+      {
+        "id": "synthetic.axiom",
+        "version": "0.1.0",
+        "binary_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    ],
+    "configuration_complete": false,
+    "input_policy": "process-commands-pre-hook-owned-input-v1",
+    "clocks": {
+      "unit": "processCommands_call_index",
+      "dt_unit": "seconds_as_passed_to_hook",
+      "hardware_arrival": "unknown",
+      "render_cadence": "not_captured",
+      "clock_policy": "fixed-scheduler-240",
+      "intervention_hook": "CCScheduler::update",
+      "step_numerator": 1,
+      "step_denominator": 240,
+      "intervention_scope": "guarded-sandbox-process",
+      "update_unit": "GJBaseGameLayer::update_call_index",
+      "scheduler_unit": "CCScheduler::update_call_index"
+    }
+  },
+  "environment_sha256": "5a81f841d38510fd8dad1712845e4b08808ac69720a7f0fc346d7da16e105d13",
+  "challenge": {
+    "id": "synthetic-fixture",
+    "level_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "game_version": "2.2081",
+    "physics_version": "recorded-processCommands-v1",
+    "input_policy": "process-commands-pre-hook-owned-input-v1",
+    "environment_id": "5a81f841d38510fd8dad1712845e4b08808ac69720a7f0fc346d7da16e105d13"
+  },
+  "integrity": {
+    "recording_complete": true,
+    "dropped_records": 0,
+    "errors": []
+  },
+  "state_fields": [
+    "x",
+    "y",
+    "y_velocity",
+    "rotation",
+    "is_dead",
+    "mode"
+  ],
+  "attempt": {
+    "id": "synthetic-clock-a",
+    "start_kind": "level_start",
+    "input_source": "replay",
+    "replay_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "planned_inputs": [
+      {
+        "command_index": 1,
+        "player": 1,
+        "button": 1,
+        "pressed": true
+      }
+    ],
+    "inputs": [
+      {
+        "sequence": 0,
+        "command_index": 1,
+        "player": 1,
+        "button": 1,
+        "pressed": true,
+        "phase": "requested",
+        "source": "replay",
+        "native_return": null,
+        "wall_time_ns": 1000001
+      },
+      {
+        "sequence": 1,
+        "command_index": 1,
+        "player": 1,
+        "button": 1,
+        "pressed": true,
+        "phase": "push",
+        "source": "replay",
+        "native_return": true,
+        "wall_time_ns": 1000002
+      }
+    ],
+    "blocked_inputs": [],
+    "trace": [
+      {
+        "command_index": 0,
+        "dt_seconds": 0.0,
+        "is_half_tick": false,
+        "is_last_tick": false,
+        "state": {
+          "player1": {
+            "x": 0.0,
+            "y": 105.0,
+            "y_velocity": 0.0,
+            "rotation": 0.0,
+            "is_dead": false,
+            "mode": "cube"
+          },
+          "player2": null
+        },
+        "phase": {
+          "level_end_animation_started": false,
+          "has_completed_level": false
+        },
+        "update_sequence": null,
+        "scheduler_sequence": null
+      },
+      {
+        "command_index": 1,
+        "dt_seconds": 0.004166666666666667,
+        "is_half_tick": false,
+        "is_last_tick": true,
+        "state": {
+          "player1": {
+            "x": 1,
+            "y": 105.0,
+            "y_velocity": 0.0,
+            "rotation": 0.0,
+            "is_dead": false,
+            "mode": "cube"
+          },
+          "player2": null
+        },
+        "phase": {
+          "level_end_animation_started": false,
+          "has_completed_level": false
+        },
+        "update_sequence": 0,
+        "scheduler_sequence": 0
+      },
+      {
+        "command_index": 2,
+        "dt_seconds": 0.004166666666666667,
+        "is_half_tick": false,
+        "is_last_tick": true,
+        "state": {
+          "player1": {
+            "x": 2,
+            "y": 105.0,
+            "y_velocity": 0.0,
+            "rotation": 0.0,
+            "is_dead": false,
+            "mode": "cube"
+          },
+          "player2": null
+        },
+        "phase": {
+          "level_end_animation_started": true,
+          "has_completed_level": true
+        },
+        "update_sequence": 0,
+        "scheduler_sequence": 0
+      }
+    ],
+    "terminal": {
+      "outcome": "completed",
+      "event": "PlayLayer::levelComplete",
+      "command_index": 2,
+      "wall_elapsed_seconds": 0.02,
+      "state": {
+        "player1": {
+          "x": 1.95,
+          "y": 105.0,
+          "y_velocity": 0.0,
+          "rotation": 0.0,
+          "is_dead": false,
+          "mode": "cube"
+        },
+        "player2": null
+      },
+      "phase": {
+        "level_end_animation_started": true,
+        "has_completed_level": true
+      },
+      "update_sequence": 0,
+      "scheduler_sequence": 0
+    },
+    "updates": [
+      {
+        "sequence": 0,
+        "parent_sequence": null,
+        "original_dt_seconds": 0.02,
+        "delivered_dt_seconds": 0.02,
+        "command_index_before": 0,
+        "command_index_after": 2,
+        "phase_before": {
+          "level_end_animation_started": false,
+          "has_completed_level": false
+        },
+        "phase_after": {
+          "level_end_animation_started": true,
+          "has_completed_level": true
+        },
+        "wall_enter_ns": 0,
+        "wall_exit_ns": 21000000,
+        "scheduler_sequence": 0
+      }
+    ],
+    "scheduler_updates": [
+      {
+        "sequence": 0,
+        "parent_sequence": null,
+        "original_dt_seconds": 0.02,
+        "delivered_dt_seconds": 0.004166666883975267,
+        "command_index_before": 0,
+        "command_index_after": 2,
+        "phase_before": {
+          "level_end_animation_started": false,
+          "has_completed_level": false
+        },
+        "phase_after": {
+          "level_end_animation_started": true,
+          "has_completed_level": true
+        },
+        "wall_enter_ns": 0,
+        "wall_exit_ns": 22000000
+      }
+    ],
+    "phase_events": [
+      {
+        "sequence": 0,
+        "event": "PlayLayer::playEndAnimationToPos",
+        "command_index": 2,
+        "update_sequence": 0,
+        "scheduler_sequence": 0,
+        "phase_before": {
+          "level_end_animation_started": false,
+          "has_completed_level": false
+        },
+        "phase_after": {
+          "level_end_animation_started": true,
+          "has_completed_level": false
+        },
+        "wall_enter_ns": 1500000,
+        "wall_exit_ns": 1600000
+      }
+    ]
+  },
+  "limitations": [
+    "SYNTHETIC TEST FIXTURE",
+    "Selected player fields only, no full-state proof"
+  ]
+}
