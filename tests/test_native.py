@@ -1007,3 +1007,52 @@ def test_schema2_capture_begun_inside_unrecorded_outer_context_does_not_invent_m
     report = inspect(tmp_path, data)
     assert report["terminal"]["scheduler_sequence"] is None
     assert report["native_cadence_observations"]["scheduler_updates"] == []
+
+
+@pytest.mark.parametrize("stream", ["updates", "scheduler_updates", "phase_events"])
+def test_schema2_cannot_open_new_rich_records_after_terminal_callback(tmp_path, stream):
+    data = rich_capture()
+    if stream == "phase_events":
+        data["attempt"][stream][0].update(wall_enter_ns=20_500_000, wall_exit_ns=20_600_000)
+    else:
+        row = deepcopy(data["attempt"][stream][0])
+        enter = 21_100_000 if stream == "updates" else 22_100_000
+        row.update(
+            sequence=1,
+            command_index_before=2,
+            command_index_after=2,
+            wall_enter_ns=enter,
+            wall_exit_ns=enter + 100_000,
+            phase_before=deepcopy(data["attempt"]["terminal"]["phase"]),
+        )
+        data["attempt"][stream].append(row)
+    with pytest.raises(ValueError, match="entry is after the reported terminal callback"):
+        inspect(tmp_path, data)
+
+
+def test_schema2_enclosing_rich_hooks_may_finish_after_terminal_callback(tmp_path):
+    data = rich_capture()
+    data["attempt"]["phase_events"][0].update(
+        wall_enter_ns=19_900_000,
+        wall_exit_ns=20_600_000,
+        phase_after=deepcopy(data["attempt"]["terminal"]["phase"]),
+    )
+    report = inspect(tmp_path, data)
+    cadence = report["native_cadence_observations"]
+    terminal_ns = report["terminal"]["wall_elapsed_seconds"] * 1e9
+    assert all(
+        cadence[name][0]["wall_exit_ns"] > terminal_ns
+        for name in ("updates", "scheduler_updates", "phase_events")
+    )
+    assert report["m1_gate"] == "not_established_by_file_inspection"
+
+
+@pytest.mark.parametrize("entry_ns,valid", [(20_001_000, True), (20_001_001, False)])
+def test_schema2_entry_timestamp_uses_existing_one_microsecond_allowance(tmp_path, entry_ns, valid):
+    data = rich_capture()
+    data["attempt"]["phase_events"][0].update(wall_enter_ns=entry_ns, wall_exit_ns=20_100_000)
+    if valid:
+        assert inspect(tmp_path, data)["capture_schema_version"] == 2
+    else:
+        with pytest.raises(ValueError, match="entry is after the reported terminal callback"):
+            inspect(tmp_path, data)

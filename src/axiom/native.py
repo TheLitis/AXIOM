@@ -176,6 +176,13 @@ def _validate_rich_observations(attempt: dict, clocks: dict, terminal_wall: floa
     schedulers = _validate_update_stream(
         attempt["scheduler_updates"], "scheduler_updates", terminal["command_index"], clocks, True
     )
+    # The producer opens records only while the run is nonterminal. Enclosing
+    # hooks can exit after the terminal callback; their late exits are valid.
+    # Use the same one-microsecond serialization allowance as the input clock.
+    terminal_entry_limit = (terminal_wall + 1e-6) * 1_000_000_000
+    for name, records in (("updates", updates), ("scheduler_updates", schedulers)):
+        if any(row["wall_enter_ns"] > terminal_entry_limit for row in records):
+            raise ValueError(f"{name} entry is after the reported terminal callback")
     for row in updates:
         scheduler = _context_id(row["scheduler_sequence"], "update.scheduler_sequence", schedulers)
         if scheduler is not None:
@@ -238,6 +245,8 @@ def _validate_rich_observations(attempt: dict, clocks: dict, terminal_wall: floa
         command = _int(event["command_index"], "phase_event.command_index", maximum=terminal["command_index"])
         enter = _int(event["wall_enter_ns"], "phase_event.wall_enter_ns")
         exit_time = _int(event["wall_exit_ns"], "phase_event.wall_exit_ns", minimum=enter)
+        if enter > terminal_entry_limit:
+            raise ValueError("Phase event entry is after the reported terminal callback")
         if command < previous_call or enter < previous_enter:
             raise ValueError("Phase event call indices and entry timestamps must be nondecreasing")
         previous_call, previous_enter = command, enter
