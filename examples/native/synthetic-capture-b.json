@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "kind": "native_capture",
+  "provenance": {
+    "origin": "synthetic",
+    "independently_verified": false,
+    "state_completeness": "selected_fields_only"
+  },
+  "collector": {
+    "id": "synthetic.axiom",
+    "version": "0.1.0",
+    "source_commit": "dddddddddddddddddddddddddddddddddddddddd",
+    "source_tree_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+    "sdk_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "bindings_commit": "ffffffffffffffffffffffffffffffffffffffff"
+  },
+  "environment": {
+    "game_executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "game_version": "2.2081",
+    "geode_version": "5.8.2",
+    "adapter_binary_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "platform": "windows-x64",
+    "mods": [
+      {
+        "id": "synthetic.axiom",
+        "version": "0.1.0",
+        "binary_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    ],
+    "configuration_complete": false,
+    "input_policy": "process-commands-pre-hook-owned-input-v1",
+    "clocks": {
+      "unit": "processCommands_call_index",
+      "dt_unit": "seconds_as_passed_to_hook",
+      "hardware_arrival": "unknown",
+      "render_cadence": "not_captured"
+    }
+  },
+  "environment_sha256": "91eb53b34e4896119f294aacce684403938cfbc9239dbeb9036ae2736742e797",
+  "challenge": {
+    "id": "synthetic-fixture",
+    "level_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "game_version": "2.2081",
+    "physics_version": "recorded-processCommands-v1",
+    "input_policy": "process-commands-pre-hook-owned-input-v1",
+    "environment_id": "91eb53b34e4896119f294aacce684403938cfbc9239dbeb9036ae2736742e797"
+  },
+  "integrity": {
+    "recording_complete": true,
+    "dropped_records": 0,
+    "errors": []
+  },
+  "state_fields": [
+    "x",
+    "y",
+    "y_velocity",
+    "rotation",
+    "is_dead",
+    "mode"
+  ],
+  "attempt": {
+    "id": "synthetic-b",
+    "start_kind": "level_start",
+    "input_source": "replay",
+    "replay_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "planned_inputs": [
+      {
+        "command_index": 1,
+        "player": 1,
+        "button": 1,
+        "pressed": true
+      }
+    ],
+    "inputs": [
+      {
+        "sequence": 0,
+        "command_index": 1,
+        "player": 1,
+        "button": 1,
+        "pressed": true,
+        "phase": "requested",
+        "source": "replay",
+        "native_return": null,
+        "wall_time_ns": 1000001
+      },
+      {
+        "sequence": 1,
+        "command_index": 1,
+        "player": 1,
+        "button": 1,
+        "pressed": true,
+        "phase": "push",
+        "source": "replay",
+        "native_return": true,
+        "wall_time_ns": 1000002
+      }
+    ],
+    "blocked_inputs": [],
+    "trace": [
+      {
+        "command_index": 0,
+        "dt_seconds": 0.0,
+        "is_half_tick": false,
+        "is_last_tick": false,
+        "state": {
+          "player1": {
+            "x": 0.0,
+            "y": 105.0,
+            "y_velocity": 0.0,
+            "rotation": 0.0,
+            "is_dead": false,
+            "mode": "cube"
+          },
+          "player2": null
+        }
+      },
+      {
+        "command_index": 1,
+        "dt_seconds": 0.004166666666666667,
+        "is_half_tick": false,
+        "is_last_tick": true,
+        "state": {
+          "player1": {
+            "x": 1,
+            "y": 105.0,
+            "y_velocity": 0.0,
+            "rotation": 0.0,
+            "is_dead": false,
+            "mode": "cube"
+          },
+          "player2": null
+        }
+      },
+      {
+        "command_index": 2,
+        "dt_seconds": 0.004166666666666667,
+        "is_half_tick": false,
+        "is_last_tick": true,
+        "state": {
+          "player1": {
+            "x": 2,
+            "y": 105.0,
+            "y_velocity": 0.0,
+            "rotation": 0.0,
+            "is_dead": false,
+            "mode": "cube"
+          },
+          "player2": null
+        }
+      }
+    ],
+    "terminal": {
+      "outcome": "completed",
+      "event": "PlayLayer::levelComplete",
+      "command_index": 2,
+      "wall_elapsed_seconds": 0.02,
+      "state": {
+        "player1": {
+          "x": 1.95,
+          "y": 105.0,
+          "y_velocity": 0.0,
+          "rotation": 0.0,
+          "is_dead": false,
+          "mode": "cube"
+        },
+        "player2": null
+      }
+    }
+  },
+  "limitations": [
+    "SYNTHETIC TEST FIXTURE",
+    "Selected player fields only, no full-state proof"
+  ]
+}

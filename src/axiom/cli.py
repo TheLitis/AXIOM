@@ -30,12 +30,18 @@ def parser():
     replay.add_argument("input", type=Path)
     oracle = commands.add_parser("trials", help="Check a supplied full-run terminal oracle trial ledger")
     oracle.add_argument("input", type=Path)
+    native = commands.add_parser("native", help="Inspect a native observer capture and its recorded limits")
+    native.add_argument("input", type=Path)
+    compare = commands.add_parser(
+        "native-compare", help="Compare recorded subsets of repeated native replays"
+    )
+    compare.add_argument("inputs", type=Path, nargs="+", help="Two to sixteen capture files")
     demo = commands.add_parser("demo", help="Create an offline report from explicitly synthetic examples")
     demo.add_argument("--examples", type=Path, default=Path("examples"))
     demo.add_argument("--out", type=Path, default=Path("reports/demo"))
     demo.add_argument("--trials", type=int, default=20000)
     demo.add_argument("--seed", type=int, default=42)
-    for command in (timing, cohort, level, replay, oracle):
+    for command in (timing, cohort, level, replay, oracle, native, compare):
         command.add_argument("--json", type=Path, help="Write machine-readable result (otherwise stdout)")
     for command in (timing, cohort):
         command.add_argument("--html", type=Path, help="Write a self-contained interactive report")
@@ -77,6 +83,14 @@ def main(argv=None):
             from .oracle import inspect_trials
 
             result = inspect_trials(args.input)
+        elif args.command == "native":
+            from .native import inspect_native_capture
+
+            result = inspect_native_capture(args.input)
+        elif args.command == "native-compare":
+            from .native import compare_native_captures
+
+            result = compare_native_captures(args.inputs)
         else:
             from .survival import analyze_cohort
 

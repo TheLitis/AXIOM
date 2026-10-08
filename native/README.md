@@ -68,9 +68,13 @@ and must be excluded from repeat comparisons. Unauthenticated observed input has
 
 Replay injects only requested inputs through `handleButton` before specified
 command calls. It uses no position corrections, checkpoint restores or fabricated
-frame-to-second conversion. Other requested input during replay aborts recording.
-The plan and exact replay-file digest are retained. Recording a schedule does not
-prove the engine consumed it identically; repeated trace/outcome checks are needed.
+frame-to-second conversion. During replay, non-injector `handleButton` requests
+are suppressed and retained separately in `attempt.blocked_inputs`, with unknown
+origin. A one-shot permission forwards each scheduled request. This owns the
+handler channel, including engine cleanup requests; equivalence to ordinary
+vanilla or human delivery is unverified. Direct player push/release calls bypassing
+this handler are not controlled. The plan and exact replay-file digest are
+retained; repeated trace/outcome checks cover only this declared policy.
 
 Terminal state is sampled after the original `levelComplete` or `destroyPlayer`
 callback. Death requires the player `m_isDead` field after that callback. A terminal
@@ -80,7 +84,7 @@ Aborts use the corresponding pause/quit/reset callback; collector errors use
 `AXIOM::error`. Exceptions, overflow and dropped records invalidate integrity.
 The exporter uses a temporary file followed by rename; output failures produce a
 log error and no claimed complete artifact. Capture is limited to 20,000 command
-calls, 12,000 input records and a 16 MiB export.
+calls, 12,000 delivered plus blocked input records and a 16 MiB export.
 
 State fields are `x`, `y`, `y_velocity`, `rotation`, `is_dead` and a mode label for
 each player pointer. They exclude trigger, checkpoint, object, RNG, collision,

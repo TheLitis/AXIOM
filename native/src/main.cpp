@@ -21,7 +21,7 @@ using Clock = std::chrono::steady_clock;
 constexpr size_t MaxBytes = 16 * 1024 * 1024;
 constexpr size_t MaxCommands = 20000;
 constexpr size_t MaxInputs = 12000;
-constexpr char Policy[] = "process-commands-pre-hook-v1";
+constexpr char Policy[] = "process-commands-pre-hook-owned-input-v1";
 
 // Environment documents contain no floating point values. Sorting keys recursively
 // matches Python's compact, sorted, ensure_ascii=False JSON for these documents.
@@ -199,6 +199,7 @@ struct Run {
     Json document;
     uint64_t command = 0;
     uint64_t sequence = 0;
+    uint64_t blockedSequence = 0;
     uint64_t dropped = 0;
     bool inCommand = false;
     bool injecting = false;
@@ -222,11 +223,25 @@ struct Run {
     void input(int button, int player, bool pressed, char const* phase, Json returned = nullptr) {
         if (terminal) return;
         if (button < 1 || button > 3) throw std::runtime_error("Unsupported native button");
-        if (attempt()["inputs"].size() >= MaxInputs) { ++dropped; throw std::runtime_error("Input trace limit reached"); }
+        if (attempt()["inputs"].size() + attempt()["blocked_inputs"].size() >= MaxInputs) {
+            ++dropped; throw std::runtime_error("Combined input trace limit reached");
+        }
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
         attempt()["inputs"].push(matjson::makeObject({{"sequence", sequence++}, {"command_index", command},
             {"player", player}, {"button", button}, {"pressed", pressed}, {"phase", phase},
             {"source", replay ? "replay" : "observed"}, {"native_return", returned}, {"wall_time_ns", elapsed}}));
+    }
+    void blockedInput(int button, int player, bool pressed) {
+        if (terminal) return;
+        if (attempt()["inputs"].size() + attempt()["blocked_inputs"].size() >= MaxInputs) {
+            ++dropped; throw std::runtime_error("Combined input trace limit reached");
+        }
+        auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
+        // Keep raw button values: a suppressed native request is diagnostic data,
+        // not one of the validated, forwarded replay plan events.
+        attempt()["blocked_inputs"].push(matjson::makeObject({{"sequence", blockedSequence++},
+            {"command_index", command}, {"player", player}, {"button", button}, {"pressed", pressed},
+            {"source", "unknown"}, {"wall_time_ns", elapsed}}));
     }
     void finish(char const* outcome, char const* event) {
         if (terminal) return;
@@ -340,11 +355,14 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
             {"attempt", matjson::makeObject({{"id", std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count()) + "-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(++runId)}, {"start_kind", startKind},
                 {"input_source", active->replay ? "replay" : "unknown"}, {"replay_sha256", nullptr},
-                {"planned_inputs", Json::array()}, {"inputs", Json::array()}, {"trace", Json::array()}, {"terminal", nullptr}})},
+                {"planned_inputs", Json::array()}, {"inputs", Json::array()}, {"blocked_inputs", Json::array()},
+                {"trace", Json::array()}, {"terminal", nullptr}})},
             {"limitations", Json(std::vector<Json>{"Selected state is not a complete resumable snapshot.",
                 "The processCommands call clock is not a demonstrated physics or hardware input clock.",
                 "Mod settings and all game configuration are not yet exhaustively captured.",
-                "No physical input provenance or human difficulty calibration is established."})}});
+                "No physical input provenance or human difficulty calibration is established.",
+                "Replay suppresses non-injector handleButton requests of unknown origin and retains blocked_inputs diagnostics.",
+                "Direct PlayerObject push/release calls bypassing handleButton are not controlled by replay channel ownership."})}});
         active->trace(0, false, false);
         if (layer->m_isPlatformer) throw std::runtime_error("M1 supports classic levels only");
         if (active->replay) {
@@ -402,7 +420,17 @@ class $modify(AxiomBaseLayer, GJBaseGameLayer) {
     void handleButton(bool down, int button, bool isPlayer1) {
         auto run = axiom::active.get();
         if (run && run->layer == this && !run->terminal) {
-            if (run->replay && !run->injecting) { axiom::fail("Unexpected external requested input during replay"); return; }
+            if (run->replay) {
+                // A one-shot permit admits only the scheduled wrapper entry.
+                // Native calls nested inside the original handler cannot reuse it.
+                bool scheduled = run->injecting;
+                run->injecting = false;
+                if (!scheduled) {
+                    try { run->blockedInput(button, isPlayer1 ? 1 : 2, down); }
+                    catch (std::exception const& error) { axiom::fail(error.what()); }
+                    return; // Deliberately do not forward any non-injector request.
+                }
+            }
             try { run->input(button, isPlayer1 ? 1 : 2, down, "requested"); }
             catch (std::exception const& error) { axiom::fail(error.what()); }
         }
