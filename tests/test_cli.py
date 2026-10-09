@@ -45,3 +45,62 @@ def test_report_rejects_mismatched_challenge(tmp_path):
         render_report(
             tmp_path / "bad.html", timing={"challenge": {"id": "one"}}, cohort={"challenge": {"id": "two"}}
         )
+
+
+def test_fixture_catalogue_cli_keeps_native_verification_unknown(tmp_path):
+    output = tmp_path / "catalogue.json"
+    assert main(["fixtures", "examples/native/fixture-matrix.json", "--json", str(output)]) == 0
+    catalogue = json.loads(output.read_text(encoding="utf-8"))
+    assert catalogue["provenance"]["native_verification"] == "not_recorded"
+    specification = tmp_path / "run.json"
+    assert (
+        main(
+            [
+                "fixtures",
+                "examples/native/fixture-matrix.json",
+                "--case",
+                "ship-portal",
+                "--run",
+                "replay",
+                "--json",
+                str(specification),
+            ]
+        )
+        == 0
+    )
+    run = json.loads(specification.read_text(encoding="utf-8"))
+    assert run["required_mode_sequences"]["player1"] == ["cube", "ship", "cube"]
+    assert [event["command_index"] for event in run["inputs"]] == [130, 160]
+
+
+def test_fixture_cli_rejects_partial_selector(tmp_path, capsys):
+    output = tmp_path / "invalid.json"
+    assert (
+        main(
+            [
+                "fixtures",
+                "examples/native/fixture-matrix.json",
+                "--case",
+                "cube-flat",
+                "--json",
+                str(output),
+            ]
+        )
+        == 2
+    )
+    assert "supplied together" in capsys.readouterr().err
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("command", ["fixture-check", "fixture-response"])
+def test_fixture_cli_reports_mismatch_in_json_instead_of_attesting_execution(tmp_path, command):
+    output = tmp_path / "mismatch.json"
+    args = [command, "examples/native/fixture-matrix.json", "examples/native/synthetic-clock-a.json"]
+    if command == "fixture-check":
+        args += ["--case", "cube-flat", "--run", "replay"]
+    else:
+        args += ["examples/native/synthetic-clock-b.json", "--case", "cube-flat", "--check", "jump-response"]
+    assert main([*args, "--json", str(output)]) == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["status"] in {"fixture_observations_mismatch", "selected_response_not_established"}
+    assert not all(report["checks"].values())

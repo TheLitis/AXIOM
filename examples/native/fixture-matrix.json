@@ -1,0 +1,919 @@
+{
+  "schema_version": 1,
+  "kind": "native_fixture_matrix",
+  "provenance": {
+    "origin": "generated_synthetic",
+    "native_verification": "not_recorded"
+  },
+  "clock": "processCommands_call_index",
+  "cases": [
+    {
+      "id": "cube-flat",
+      "label": "Generated cube flat fixture",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1,2,600,3,-15;",
+      "level_sha256": "af8167d7ab8240a2798840a5f479f3af6144647c7bb41423e2303492b0e05558",
+      "mechanics_intent": [
+        "cube-jump"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 60,
+              "player": 1,
+              "button": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 90,
+              "player": 1,
+              "button": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "skip-input",
+          "role": "response_control",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          }
+        }
+      ],
+      "response_checks": [
+        {
+          "id": "jump-response",
+          "reference_run": "skip-input",
+          "changed_run": "replay",
+          "player": 1,
+          "fields": [
+            "y",
+            "y_velocity"
+          ],
+          "mode": "cube"
+        }
+      ]
+    },
+    {
+      "id": "cube-spike",
+      "label": "Generated cube spike fixture",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,8,2,150,3,15;1,1,2,600,3,-15;",
+      "level_sha256": "2b773cf937c91791c9f4d8340e129d7d9e40059c787c018bfd414544c2b82806",
+      "mechanics_intent": [
+        "cube-jump",
+        "single-spike"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "died",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 60,
+              "player": 1,
+              "button": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 90,
+              "player": 1,
+              "button": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "skip-input",
+          "role": "response_control",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "died",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          }
+        }
+      ],
+      "response_checks": [
+        {
+          "id": "jump-response",
+          "reference_run": "skip-input",
+          "changed_run": "replay",
+          "player": 1,
+          "fields": [
+            "y",
+            "y_velocity"
+          ],
+          "mode": "cube"
+        }
+      ]
+    },
+    {
+      "id": "cube-multi-jump",
+      "label": "Generated cube multi jump fixture",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1,2,600,3,-15;",
+      "level_sha256": "af8167d7ab8240a2798840a5f479f3af6144647c7bb41423e2303492b0e05558",
+      "mechanics_intent": [
+        "cube-repeated-input"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 60,
+              "player": 1,
+              "button": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 90,
+              "player": 1,
+              "button": 1,
+              "pressed": false
+            },
+            {
+              "command_index": 220,
+              "player": 1,
+              "button": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 250,
+              "player": 1,
+              "button": 1,
+              "pressed": false
+            },
+            {
+              "command_index": 380,
+              "player": 1,
+              "button": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 410,
+              "player": 1,
+              "button": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "skip-input",
+          "role": "response_control",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          }
+        }
+      ],
+      "response_checks": [
+        {
+          "id": "jump-response",
+          "reference_run": "skip-input",
+          "changed_run": "replay",
+          "player": 1,
+          "fields": [
+            "y",
+            "y_velocity"
+          ],
+          "mode": "cube"
+        }
+      ]
+    },
+    {
+      "id": "cube-long-hold",
+      "label": "Generated cube long hold fixture",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1,2,600,3,-15;",
+      "level_sha256": "af8167d7ab8240a2798840a5f479f3af6144647c7bb41423e2303492b0e05558",
+      "mechanics_intent": [
+        "cube-held-input",
+        "cube-release-input"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 60,
+              "player": 1,
+              "button": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 300,
+              "player": 1,
+              "button": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "skip-input",
+          "role": "response_control",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          }
+        }
+      ],
+      "response_checks": [
+        {
+          "id": "jump-response",
+          "reference_run": "skip-input",
+          "changed_run": "replay",
+          "player": 1,
+          "fields": [
+            "y",
+            "y_velocity"
+          ],
+          "mode": "cube"
+        }
+      ]
+    },
+    {
+      "id": "ship-portal",
+      "label": "Generated cube to ship portal fixture",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,13,2,150,3,15;1,12,2,300,3,15;1,1,2,600,3,-15;",
+      "level_sha256": "3d697e448e53462c76745dc6afa960bf18f0c0f33828a746ff2d6518b8b1ee75",
+      "mechanics_intent": [
+        "ship-portal",
+        "ship-input-response"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "ship",
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 130,
+              "player": 1,
+              "button": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 160,
+              "player": 1,
+              "button": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "ship",
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "skip-input",
+          "role": "response_control",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "ship",
+              "cube"
+            ],
+            "player2": null
+          }
+        }
+      ],
+      "response_checks": [
+        {
+          "id": "ship-response",
+          "reference_run": "skip-input",
+          "changed_run": "replay",
+          "player": 1,
+          "fields": [
+            "y",
+            "y_velocity"
+          ],
+          "mode": "ship"
+        }
+      ]
+    },
+    {
+      "id": "ball-portal",
+      "label": "Generated cube to ball portal fixture",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,47,2,150,3,15;1,12,2,300,3,15;1,1,2,600,3,-15;",
+      "level_sha256": "871ade9e5b20ba7ef965b7ebe22b234d016bb1cd8c0a0f1689fd7f99f547fbda",
+      "mechanics_intent": [
+        "ball-portal",
+        "ball-input-response"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "ball",
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 130,
+              "player": 1,
+              "button": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 160,
+              "player": 1,
+              "button": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "ball"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "skip-input",
+          "role": "response_control",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "ball",
+              "cube"
+            ],
+            "player2": null
+          }
+        }
+      ],
+      "response_checks": [
+        {
+          "id": "ball-response",
+          "reference_run": "skip-input",
+          "changed_run": "replay",
+          "player": 1,
+          "fields": [
+            "y",
+            "y_velocity"
+          ],
+          "mode": "ball"
+        }
+      ]
+    },
+    {
+      "id": "ufo-portal",
+      "label": "Generated cube to ufo portal fixture",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,111,2,150,3,15;1,12,2,300,3,15;1,1,2,600,3,-15;",
+      "level_sha256": "0b7083d871cd678bd4d9403a4b361c92754891cce0acf0f7e2490f66fb507bee",
+      "mechanics_intent": [
+        "ufo-portal",
+        "ufo-input-response"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "ufo",
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 130,
+              "player": 1,
+              "button": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 160,
+              "player": 1,
+              "button": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "ufo",
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "skip-input",
+          "role": "response_control",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "ufo",
+              "cube"
+            ],
+            "player2": null
+          }
+        }
+      ],
+      "response_checks": [
+        {
+          "id": "ufo-response",
+          "reference_run": "skip-input",
+          "changed_run": "replay",
+          "player": 1,
+          "fields": [
+            "y",
+            "y_velocity"
+          ],
+          "mode": "ufo"
+        }
+      ]
+    },
+    {
+      "id": "wave-portal",
+      "label": "Generated cube to wave portal fixture",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,660,2,150,3,15;1,12,2,300,3,15;1,1,2,600,3,-15;",
+      "level_sha256": "0342085c871c656a051f3f0ef331c78fed4d0cb4790119e9a0538e5805d2a82d",
+      "mechanics_intent": [
+        "wave-portal",
+        "wave-input-response"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "wave",
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 130,
+              "player": 1,
+              "button": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 160,
+              "player": 1,
+              "button": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "wave",
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "skip-input",
+          "role": "response_control",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "wave",
+              "cube"
+            ],
+            "player2": null
+          }
+        }
+      ],
+      "response_checks": [
+        {
+          "id": "wave-response",
+          "reference_run": "skip-input",
+          "changed_run": "replay",
+          "player": 1,
+          "fields": [
+            "y",
+            "y_velocity"
+          ],
+          "mode": "wave"
+        }
+      ]
+    },
+    {
+      "id": "robot-portal",
+      "label": "Generated cube to robot portal fixture",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,745,2,150,3,15;1,12,2,300,3,15;1,1,2,600,3,-15;",
+      "level_sha256": "9b20c20466520c347904ac0e8ae7f1d9780a8d34d8f4b41e03890739e588f0ab",
+      "mechanics_intent": [
+        "robot-portal",
+        "robot-input-response"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "robot",
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 130,
+              "player": 1,
+              "button": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 160,
+              "player": 1,
+              "button": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "robot",
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "skip-input",
+          "role": "response_control",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "robot",
+              "cube"
+            ],
+            "player2": null
+          }
+        }
+      ],
+      "response_checks": [
+        {
+          "id": "robot-response",
+          "reference_run": "skip-input",
+          "changed_run": "replay",
+          "player": 1,
+          "fields": [
+            "y",
+            "y_velocity"
+          ],
+          "mode": "robot"
+        }
+      ]
+    },
+    {
+      "id": "spider-portal",
+      "label": "Generated cube to spider portal fixture",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1331,2,150,3,15;1,12,2,300,3,15;1,1,2,600,3,-15;",
+      "level_sha256": "13b66ef1aa7c8bc98410975a70efae29866389e0b49ecde539a5d4b9c8e80130",
+      "mechanics_intent": [
+        "spider-portal",
+        "spider-input-response"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "spider",
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 130,
+              "player": 1,
+              "button": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 160,
+              "player": 1,
+              "button": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "spider"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "skip-input",
+          "role": "response_control",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "spider",
+              "cube"
+            ],
+            "player2": null
+          }
+        }
+      ],
+      "response_checks": [
+        {
+          "id": "spider-response",
+          "reference_run": "skip-input",
+          "changed_run": "replay",
+          "player": 1,
+          "fields": [
+            "y",
+            "y_velocity"
+          ],
+          "mode": "spider"
+        }
+      ]
+    },
+    {
+      "id": "swing-portal",
+      "label": "Generated cube to swing portal fixture",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1933,2,150,3,15;1,12,2,300,3,15;1,1,2,600,3,-15;",
+      "level_sha256": "e6c6ddfc6bde59289c75b24d5a4e6a2a03975b9d008da84b69664cae18aa682f",
+      "mechanics_intent": [
+        "swing-portal",
+        "swing-input-response"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "swing",
+              "cube"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 130,
+              "player": 1,
+              "button": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 160,
+              "player": 1,
+              "button": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "swing"
+            ],
+            "player2": null
+          }
+        },
+        {
+          "id": "skip-input",
+          "role": "response_control",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube",
+              "swing",
+              "cube"
+            ],
+            "player2": null
+          }
+        }
+      ],
+      "response_checks": [
+        {
+          "id": "swing-response",
+          "reference_run": "skip-input",
+          "changed_run": "replay",
+          "player": 1,
+          "fields": [
+            "y",
+            "y_velocity"
+          ],
+          "mode": "swing"
+        }
+      ]
+    }
+  ]
+}

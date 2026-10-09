@@ -36,12 +36,44 @@ def parser():
         "native-compare", help="Compare recorded subsets of repeated native replays"
     )
     compare.add_argument("inputs", type=Path, nargs="+", help="Two to sixteen capture files")
+    fixtures = commands.add_parser(
+        "fixtures", help="Validate generated fixture specifications; no native verification"
+    )
+    fixtures.add_argument("input", type=Path)
+    fixtures.add_argument("--case", dest="case_id", help="Select a case with --run")
+    fixtures.add_argument("--run", dest="run_id", help="Emit a validated run specification with --case")
+    fixture_check = commands.add_parser(
+        "fixture-check", help="Check supplied native observations against a fixture"
+    )
+    fixture_check.add_argument("input", type=Path, help="Fixture matrix")
+    fixture_check.add_argument("capture", type=Path)
+    fixture_check.add_argument("--case", dest="case_id", required=True)
+    fixture_check.add_argument("--run", dest="run_id", required=True)
+    fixture_response = commands.add_parser(
+        "fixture-response", help="Check selected response to different owned input plans"
+    )
+    fixture_response.add_argument("input", type=Path, help="Fixture matrix")
+    fixture_response.add_argument("reference", type=Path)
+    fixture_response.add_argument("changed", type=Path)
+    fixture_response.add_argument("--case", dest="case_id", required=True)
+    fixture_response.add_argument("--check", dest="check_id", required=True)
     demo = commands.add_parser("demo", help="Create an offline report from explicitly synthetic examples")
     demo.add_argument("--examples", type=Path, default=Path("examples"))
     demo.add_argument("--out", type=Path, default=Path("reports/demo"))
     demo.add_argument("--trials", type=int, default=20000)
     demo.add_argument("--seed", type=int, default=42)
-    for command in (timing, cohort, level, replay, oracle, native, compare):
+    for command in (
+        timing,
+        cohort,
+        level,
+        replay,
+        oracle,
+        native,
+        compare,
+        fixtures,
+        fixture_check,
+        fixture_response,
+    ):
         command.add_argument("--json", type=Path, help="Write machine-readable result (otherwise stdout)")
     for command in (timing, cohort):
         command.add_argument("--html", type=Path, help="Write a self-contained interactive report")
@@ -91,6 +123,23 @@ def main(argv=None):
             from .native import compare_native_captures
 
             result = compare_native_captures(args.inputs)
+        elif args.command == "fixtures":
+            from .fixtures import get_fixture_run, load_fixture_matrix
+
+            if bool(args.case_id) != bool(args.run_id):
+                raise ValueError("--case and --run must be supplied together")
+            matrix = load_fixture_matrix(args.input)
+            result = get_fixture_run(matrix, args.case_id, args.run_id) if args.case_id else matrix
+        elif args.command == "fixture-check":
+            from .fixtures import inspect_fixture_capture
+
+            result = inspect_fixture_capture(args.input, args.case_id, args.run_id, args.capture)
+        elif args.command == "fixture-response":
+            from .fixtures import compare_fixture_response
+
+            result = compare_fixture_response(
+                args.input, args.case_id, args.check_id, args.reference, args.changed
+            )
         else:
             from .survival import analyze_cohort
 
