@@ -24,7 +24,44 @@ function Assert-OrdinaryFile([string]$Path) {
         }
     }
 }
+function Get-AxiomDefaultNativePackage([string]$Workspace) {
+    $workspaceRoot = [System.IO.Path]::GetFullPath($Workspace).TrimEnd([char[]]'\/')
+    Assert-OrdinaryDirectory (Join-Path $workspaceRoot '.tools')
+    $markerPath = Join-Path $workspaceRoot '.tools/native-package-path.txt'
+    Assert-OrdinaryFile $markerPath
+    if (Test-Path -LiteralPath $markerPath) {
+        if ((Get-Item -LiteralPath $markerPath).Length -gt 4096) {
+            throw 'Native package marker exceeds the supported path length.'
+        }
+        $relative = [System.IO.File]::ReadAllText($markerPath).Trim()
+        $parts = @($relative -split '[\\/]')
+        if (-not $relative -or [System.IO.Path]::IsPathRooted($relative) -or
+            @($parts | Where-Object {
+                -not $_ -or $_ -eq '.' -or $_ -eq '..' -or
+                $_.EndsWith('.') -or $_.EndsWith(' ') -or
+                $_.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -ge 0
+            }).Count -gt 0) {
+            throw 'Native package marker must contain one workspace-relative path without traversal.'
+        }
+        $packagePath = [System.IO.Path]::GetFullPath((Join-Path $workspaceRoot $relative))
+        if (-not $packagePath.StartsWith($workspaceRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Native package marker resolves outside the workspace.'
+        }
+    } else {
+        $packagePath = Join-Path $workspaceRoot 'native/build/axiom.native-capture.geode'
+    }
+    $current = [System.IO.Path]::GetDirectoryName($packagePath)
+    while ($current -ne $workspaceRoot) {
+        Assert-OrdinaryDirectory $current
+        $current = [System.IO.Path]::GetDirectoryName($current)
+    }
+    Assert-OrdinaryFile $packagePath
+    return $packagePath
+}
 Assert-OrdinaryDirectory (Join-Path $workspace '.tools')
+if (-not $NativePackage) { $NativePackage = Get-AxiomDefaultNativePackage $workspace }
+Assert-OrdinaryFile $NativePackage
+$packagePath = (Resolve-Path -LiteralPath $NativePackage).Path
 Assert-OrdinaryDirectory $runtimeDir
 Assert-OrdinaryDirectory (Join-Path $runtimeDir 'sandbox-saves')
 Assert-OrdinaryDirectory (Join-Path $runtimeDir 'geode')
@@ -64,8 +101,6 @@ $expectedLoaderHash = '61847e05d4aa416bfd4d1f4e026b5b0e66848756473b285add6233a5c
 if ((Get-FileHash -LiteralPath (Join-Path $gameDir 'Geode.dll') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedLoaderHash) {
     throw 'This sandbox fixture requires the pinned Geode 5.8.2 loader binary.'
 }
-if (-not $NativePackage) { $NativePackage = Join-Path $workspace 'native/build/axiom.native-capture.geode' }
-$packagePath = (Resolve-Path -LiteralPath $NativePackage).Path
 New-Item -ItemType Directory -Force $runtimeDir | Out-Null
 Copy-Item -LiteralPath $gameExe -Destination (Join-Path $runtimeDir 'AXIOMSandbox.exe') -Force
 Get-ChildItem -LiteralPath $gameDir -File -Filter '*.dll' | ForEach-Object {

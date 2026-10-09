@@ -12,6 +12,96 @@ $cliDir = Join-Path $toolsDir 'geode-cli'
 $sdkCommit = '2a5fd87433da47d6bf07221774f0cbb25535ae08'
 $bindingsCommit = '2a8b5c489ce8b49e7061b0543aa2bc5b22570063'
 
+function Assert-AxiomBuildDirectory([string]$Path, [string]$Workspace) {
+    $current = [System.IO.Path]::GetFullPath($Path)
+    $root = [System.IO.Path]::GetFullPath($Workspace).TrimEnd([char[]]'\/')
+    if (-not $current.StartsWith($root + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Native build directory must remain inside the workspace.'
+    }
+    while ($current -ne $root) {
+        if (Test-Path -LiteralPath $current) {
+            $item = Get-Item -LiteralPath $current -Force
+            if (-not $item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+                throw "Native build directory must not be a file or reparse point: $current"
+            }
+        }
+        $current = [System.IO.Path]::GetDirectoryName($current)
+    }
+}
+
+function Get-AxiomCMakeCacheIdentity([string]$BuildDirectory, [string]$Workspace) {
+    Assert-AxiomBuildDirectory $BuildDirectory $Workspace
+    $cachePath = Join-Path $BuildDirectory 'CMakeCache.txt'
+    if (-not (Test-Path -LiteralPath $cachePath)) { return $null }
+    $item = Get-Item -LiteralPath $cachePath -Force
+    if ($item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        throw "CMake cache must be an ordinary file: $cachePath"
+    }
+    $lines = [System.IO.File]::ReadAllLines($cachePath)
+    $source = @($lines | Where-Object { $_ -match '^CMAKE_HOME_DIRECTORY:INTERNAL=' })
+    $binary = @($lines | Where-Object { $_ -match '^CMAKE_CACHEFILE_DIR:INTERNAL=' })
+    if ($source.Count -ne 1 -or $binary.Count -ne 1) {
+        throw "Existing CMake cache has no unique source/build identity; preserved: $cachePath"
+    }
+    $sourcePath = $source[0].Substring('CMAKE_HOME_DIRECTORY:INTERNAL='.Length)
+    $binaryPath = $binary[0].Substring('CMAKE_CACHEFILE_DIR:INTERNAL='.Length)
+    if (-not [System.IO.Path]::IsPathRooted($sourcePath) -or -not [System.IO.Path]::IsPathRooted($binaryPath)) {
+        throw "Existing CMake cache has a non-absolute source/build identity; preserved: $cachePath"
+    }
+    return @{
+        Source = [System.IO.Path]::GetFullPath($sourcePath)
+        Build = [System.IO.Path]::GetFullPath($binaryPath)
+    }
+}
+
+function Get-AxiomBuildDirectory([string]$Workspace) {
+    $sourceDir = [System.IO.Path]::GetFullPath((Join-Path $Workspace 'native'))
+    $buildDir = [System.IO.Path]::GetFullPath((Join-Path $Workspace 'native/build'))
+    $cache = Get-AxiomCMakeCacheIdentity $buildDir $Workspace
+    if ($cache -and -not [string]::Equals($cache.Source, $sourceDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+        # CMake embeds absolute source and dependency paths. Preserve the moved
+        # cache and select a new ignored directory, never rewrite or reset it.
+        $hasher = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($sourceDir.Replace('\', '/').ToLowerInvariant())
+            $digest = [System.BitConverter]::ToString($hasher.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant()
+        } finally { $hasher.Dispose() }
+        $buildDir = Join-Path $Workspace ('.tools/native-build-' + $digest.Substring(0, 16))
+        Write-Host "Preserving relocated native/build cache; selecting $buildDir"
+        $cache = Get-AxiomCMakeCacheIdentity $buildDir $Workspace
+    }
+    if ($cache -and (
+        -not [string]::Equals($cache.Source, $sourceDir, [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals($cache.Build, $buildDir, [System.StringComparison]::OrdinalIgnoreCase)
+    )) {
+        throw "Selected CMake cache belongs to another source or build directory; preserved: $buildDir"
+    }
+    return $buildDir
+}
+
+function Write-AxiomNativePackageMarker([string]$BuildDirectory, [string]$Workspace) {
+    Assert-AxiomBuildDirectory $BuildDirectory $Workspace
+    $toolsPath = Join-Path $Workspace '.tools'
+    Assert-AxiomBuildDirectory $toolsPath $Workspace
+    $packagePath = Join-Path $BuildDirectory 'axiom.native-capture.geode'
+    if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) {
+        throw 'Native build returned successfully without the expected package; package marker was preserved.'
+    }
+    $package = Get-Item -LiteralPath $packagePath -Force
+    if ($package.Length -eq 0 -or ($package.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        throw 'Native package must be a nonempty ordinary file; package marker was preserved.'
+    }
+    $markerPath = Join-Path $toolsPath 'native-package-path.txt'
+    if (Test-Path -LiteralPath $markerPath) {
+        $marker = Get-Item -LiteralPath $markerPath -Force
+        if ($marker.PSIsContainer -or ($marker.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            throw 'Native package marker must be an ordinary file; preserved without replacement.'
+        }
+    }
+    $relativePackage = $packagePath.Substring([System.IO.Path]::GetFullPath($Workspace).TrimEnd([char[]]'\/').Length + 1).Replace('\', '/')
+    [System.IO.File]::WriteAllText($markerPath, $relativePackage, [System.Text.UTF8Encoding]::new($false))
+}
+
 function Invoke-Checked([string]$Program, [string[]]$Arguments) {
     & $Program @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Program failed with exit code $LASTEXITCODE" }
@@ -39,6 +129,7 @@ function Ensure-Archive([string]$Url, [string]$Destination, [string]$ExpectedHas
     if ($actual -ne $ExpectedHash) { throw "SHA-256 mismatch for $Destination" }
 }
 
+$buildDir = Get-AxiomBuildDirectory $workspace
 New-Item -ItemType Directory -Force $toolsDir, $cliDir | Out-Null
 Ensure-Checkout $sdkDir 'https://github.com/geode-sdk/geode.git' $sdkCommit
 Ensure-Checkout $bindingsDir 'https://github.com/geode-sdk/bindings.git' $bindingsCommit
@@ -69,7 +160,6 @@ if (-not $CMakePath) {
     if (Test-Path -LiteralPath $bundled) { $CMakePath = $bundled }
     else { $CMakePath = (Get-Command cmake -ErrorAction Stop).Source }
 }
-$buildDir = Join-Path $workspace 'native/build'
 Invoke-Checked $CMakePath @(
     '-S', (Join-Path $workspace 'native'), '-B', $buildDir,
     '-G', $generator, '-A', 'x64',
@@ -80,4 +170,5 @@ Invoke-Checked $CMakePath @(
     "-DCPM_SOURCE_CACHE=$(Join-Path $toolsDir 'cpm-cache')"
 )
 Invoke-Checked $CMakePath @('--build', $buildDir, '--config', 'Release', '--parallel', "$Jobs")
+Write-AxiomNativePackageMarker $buildDir $workspace
 Write-Output "Native package built in $buildDir. Installation and game launch are separate operations."
