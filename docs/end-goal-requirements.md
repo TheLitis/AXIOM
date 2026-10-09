@@ -6,6 +6,8 @@ Assessment date: 2026-10-09. Baseline: v0.1.0, commit `67080d6`. This document d
 
 Development update: an [experimental native adapter](native-adapter.md) now builds and captures/replays in Windows x64 / GD 2.2081 / Geode 5.8.2. The [clock investigation](clock-investigation.md) records repeat agreement of the declared subset on two generated fixtures under a fixed-scheduler intervention, while native and fixed-game-layer policies still diverge. This is progress beyond the released baseline, not completion of the full M1 contract, timing-window measurement or human difficulty calibration.
 
+The later [fixture matrix](native-fixture-matrix.md) passed 55 separate attempts across 11 declared cases and eight observed mode labels, including three exact completed replays and an owned-input response contrast per case. This expands the checked payload/plan domain; gravity/size/speed/dual, ordinary-input equivalence and the remaining M1 gates still require evidence.
+
 ## 1. Final product contract
 
 For an exact level revision, verified execution environment, information/practice protocol and specified player or reference population, AXIOM should produce:

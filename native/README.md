@@ -154,6 +154,13 @@ native phases and all selected state remain strict comparison evidence. Passing
 an isolated fixed-clock fixture would establish only its recorded subset under
 that intervention, not general engine determinism or M1 physics completion.
 
+The [generated fixture matrix](../docs/native-fixture-matrix.md) separately
+declares exact level payloads, owned input plans, pre-ending selected mode
+sequences, terminal outcomes and response controls. Its runner compares whole
+recorded replays through terminal. The evidence ledger identifies the tested
+collector and evaluator separately; eight selected mode labels do not establish
+complete physics-state or mechanics coverage.
+
 The separate scheduler/action timing is grounded in the pinned SDK's scheduler
 API and the upstream Cocos
 [scheduler implementation](https://github.com/cocos2d/cocos2d-x/blob/cocos2d-x-2.2.3/cocos2dx/CCScheduler.cpp#L725-L760)

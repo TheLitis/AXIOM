@@ -40,11 +40,11 @@ M1 должен подтвердить запись и повторяемое в
 
 ```powershell
 powershell -File .\scripts\build-native.ps1 -Jobs 4
-Get-ChildItem -LiteralPath .\native\build -Filter '*.geode' |
-    Get-FileHash -Algorithm SHA256
+$nativePackage = Join-Path (Get-Location).Path (Get-Content -LiteralPath .\.tools\native-package-path.txt -Raw)
+Get-FileHash -LiteralPath $nativePackage -Algorithm SHA256
 ```
 
-Скрипт размещает зависимости в игнорируемом `.tools`, использует установленные Visual Studio x64 C++ tools и CMake и собирает пакет в `native/build`. Существующие checkout с другим commit или изменениями сохраняются, а сборка останавливается. Сборка, установка и запуск игры — отдельные действия. Для первой проверки нужна изолированная среда игры и сохранений; личные сохранения не используются для испытания пакета.
+Скрипт размещает зависимости в игнорируемом `.tools`, использует установленные Visual Studio x64 C++ tools и CMake и обычно собирает пакет в `native/build`. Если кэш относится к прежнему расположению проекта, скрипт сохраняет его и пакет, выбирая отдельный `.tools/native-build-<hash>`. Конфликтующий выбранный кэш отклоняется. Только успешная сборка с непустым пакетом записывает `.tools/native-package-path.txt`; подготовка sandbox разрешает указанный относительный путь внутри проекта. Явный `-NativePackage` имеет приоритет, а без маркера используется прежний пакет `native/build`. Существующие checkout с другим commit или изменениями сохраняются, а сборка останавливается. Сборка, установка и запуск игры — отдельные действия. Для первой проверки нужна изолированная среда игры и сохранений; личные сохранения не используются для испытания пакета.
 
 ## Управление, тестовая копия и локальные файлы
 
@@ -77,9 +77,12 @@ Start-Process -FilePath $sandboxExe -WorkingDirectory (Split-Path -Parent $sandb
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-native-clock-study.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -Repetitions 3
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-native-smoke.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -Fixture spike -ClockPolicy fixed-scheduler-240 -Repetitions 3
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-native-controls.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -ClockPolicy fixed-scheduler-240
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-native-matrix.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -Repetitions 3
 ```
 
 Smoke-скрипт требует исполнения всего расписания press/release и нативных callbacks игрока, затем завершается ошибкой при расхождении точного сравнения. Контрольный скрипт требует нативной смерти на созданном препятствии и отказа от replay с неверным уровнем. Исследование часов сохраняет шесть комбинаций, включая расхождения, и требует успешного сравнения обоих случаев с фиксированным Scheduler. Каждый скрипт сохраняет локальные доказательства и восстанавливает прежние fixture, replay и настройки sandbox-мода/loader — точные байты и факт существования, включая ошибку эксперимента. Указанный каталог результатов smoke не должен существовать заранее. `-ExecutionPolicy Bypass` действует только для запускаемого процесса PowerShell. Фактические результаты и открытые критерии находятся в [первом журнале](native-validation.ru.md) и [исследовании часов](clock-investigation.ru.md).
+
+[Матрица тестовых сценариев](native-fixture-matrix.ru.md) задаёт созданные уровни, точные планы ввода, последовательности режимов до анимации финиша и ожидаемые исходы отдельно от записанного доказательства. Скрипт сравнивает весь записанный replay до terminal между повторами и проверяет выбранный отклик на ввод относительно пустого owned-input плана. Команды `fixtures`, `fixture-check` и `fixture-response` проверяют присланные файлы без запуска или аутентификации движка. Корректный JSON с расхождением может иметь CLI exit 0; скрипт читает итоговый статус перед признанием сценария успешным.
 
 Нужно различать два каталога сохранений. Помощник направляет writable paths движка `CCFileUtils` в `.tools/runtime/sandbox-saves`. Geode независимо получает save root из имени executable: обычно `%LOCALAPPDATA%\AXIOMSandbox`. Поэтому записи мода обычно находятся в `%LOCALAPPDATA%\AXIOMSandbox\geode\mods\axiom.native-capture\captures`, а исходный реплей — в соседнем `replay.json`. Если создать AppData-каталог не удалось, Geode использует каталог executable; фактический путь нужно проверить в runtime, а не предполагать. [Фиксированная реализация Windows save root](https://github.com/geode-sdk/geode/blob/2a5fd87433da47d6bf07221774f0cbb25535ae08/loader/src/platform/windows/util.cpp), [путь сохранений мода](https://github.com/geode-sdk/geode/blob/2a5fd87433da47d6bf07221774f0cbb25535ae08/loader/src/loader/ModImpl.cpp)
 
