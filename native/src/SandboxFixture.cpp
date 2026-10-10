@@ -32,6 +32,23 @@ gd::string sandboxWritablePath() {
     std::filesystem::create_directories(path);
     return (path.generic_string() + "/").c_str();
 }
+
+void launchSandboxFixture(std::string const& raw) {
+    queueInMainThread([raw]() {
+        auto level = GJGameLevel::create();
+        level->m_levelName = "AXIOM instrument fixture";
+        level->m_levelString = raw.c_str();
+        level->m_levelType = GJLevelType::Editor;
+        level->m_audioTrack = 0;
+        auto scene = PlayLayer::scene(level, false, false);
+        if (!scene) {
+            log::error("AXIOM sandbox fixture scene creation failed");
+            return;
+        }
+        CCDirector::sharedDirector()->replaceScene(scene);
+        log::info("AXIOM sandbox fixture launched; input authorship is not authenticated by the collector");
+    });
+}
 }
 
 class $modify(AxiomSandboxFiles, CCFileUtilsWin32) {
@@ -46,6 +63,15 @@ class $modify(AxiomSandboxFiles, CCFileUtilsWin32) {
 };
 
 class $modify(AxiomSandboxMenu, MenuLayer) {
+    struct Fields {
+        std::string fixtureRaw;
+        bool manualStarted = false;
+    };
+    void onAxiomManualStart(CCObject*) {
+        if (!sandboxEnabled() || m_fields->manualStarted || m_fields->fixtureRaw.empty()) return;
+        m_fields->manualStarted = true;
+        launchSandboxFixture(m_fields->fixtureRaw);
+    }
     bool init() {
         if (!MenuLayer::init()) return false;
         static bool started = false;
@@ -72,20 +98,23 @@ class $modify(AxiomSandboxMenu, MenuLayer) {
         // The isolated fixture's effective replay mode comes only from the launch
         // flag, so a saved toggle cannot silently turn the baseline into replay.
         Mod::get()->setSettingValue("replay-enabled", false);
-        queueInMainThread([raw]() {
-            auto level = GJGameLevel::create();
-            level->m_levelName = "AXIOM instrument fixture";
-            level->m_levelString = raw.c_str();
-            level->m_levelType = GJLevelType::Editor;
-            level->m_audioTrack = 0;
-            auto scene = PlayLayer::scene(level, false, false);
-            if (!scene) {
-                log::error("AXIOM sandbox fixture scene creation failed");
-                return;
-            }
-            CCDirector::sharedDirector()->replaceScene(scene);
-            log::info("AXIOM sandbox fixture launched; no human or rating evidence");
-        });
+        if (Loader::get()->getLaunchFlag("axiom-sandbox-manual")) {
+            // Only the explicitly guarded sandbox gets this user-operated
+            // start control. No OS keyboard/mouse input is synthesized here.
+            m_fields->fixtureRaw = raw;
+            auto size = CCDirector::sharedDirector()->getWinSize();
+            auto menu = CCMenu::create();
+            menu->setPosition({size.width / 2.f, size.height - 95.f});
+            auto button = CCMenuItemSpriteExtra::create(ButtonSprite::create("Start AXIOM Test"), this,
+                menu_selector(AxiomSandboxMenu::onAxiomManualStart));
+            menu->addChild(button);
+            this->addChild(menu, 100);
+            auto label = CCLabelBMFont::create("Press and release SPACE after starting", "bigFont.fnt");
+            label->setScale(0.35f);
+            label->setPosition({size.width / 2.f, size.height - 60.f});
+            this->addChild(label, 100);
+            log::info("AXIOM sandbox manual test ready; waiting for the user's Start AXIOM Test button");
+        } else launchSandboxFixture(raw);
         return true;
     }
 };

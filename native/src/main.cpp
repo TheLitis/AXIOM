@@ -882,6 +882,12 @@ class $modify(AxiomBaseLayer, GJBaseGameLayer) {
         });
         GJBaseGameLayer::triggerMoveCommand(object);
     }
+    void toggleGroup(int group, bool activate) {
+        axiom::MechanicPair observation(this, "GJBaseGameLayer::toggleGroup", 0, nullptr, [=] {
+            return matjson::makeObject({{"group", group}, {"activate", activate}});
+        });
+        GJBaseGameLayer::toggleGroup(group, activate);
+    }
     void toggleGroupTriggered(int group, bool activate, gd::vector<int> const& keys, int triggerID, int controlID) {
         axiom::MechanicPair observation(this, "GJBaseGameLayer::toggleGroupTriggered", 0, nullptr, [&] {
             return matjson::makeObject({{"group", group}, {"activate", activate}, {"remap_keys", axiom::remap(&keys)},
