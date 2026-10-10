@@ -23,6 +23,8 @@ MAX_PHASE_EVENTS = 256
 INPUT_POLICY = "process-commands-pre-hook-owned-input-v1"
 LEGACY_INPUT_POLICY = "process-commands-pre-hook-v1"
 PLAYER_FIELDS = frozenset({"x", "y", "y_velocity", "rotation", "is_dead", "mode"})
+PLAYER_FIELDS_V3 = PLAYER_FIELDS | {"gravity_inverted", "vehicle_size", "player_speed"}
+LAYER_FIELDS_V3 = frozenset({"dual_active"})
 PHASE_FIELDS = frozenset({"level_end_animation_started", "has_completed_level"})
 
 
@@ -77,12 +79,26 @@ def _text(value: Any, name: str) -> str:
     return result
 
 
-def _player(value: Any, name: str) -> dict:
-    state = _fields(value, name, PLAYER_FIELDS)
+def _player(value: Any, name: str, *, extended: bool = False) -> dict:
+    state = _fields(value, name, PLAYER_FIELDS_V3 if extended else PLAYER_FIELDS)
     for key in ("x", "y", "y_velocity", "rotation"):
         finite(state[key], f"{name}.{key}")
     _bool(state["is_dead"], f"{name}.is_dead")
     _text(state["mode"], f"{name}.mode")
+    if extended:
+        _bool(state["gravity_inverted"], f"{name}.gravity_inverted")
+        for key in ("vehicle_size", "player_speed"):
+            finite(state[key], f"{name}.{key}")
+    return state
+
+
+def _state(value: Any, name: str, *, extended: bool = False) -> dict:
+    state = _fields(value, name, {"player1", "player2"} | (LAYER_FIELDS_V3 if extended else set()))
+    _player(state["player1"], f"{name}.player1", extended=extended)
+    if state["player2"] is not None:
+        _player(state["player2"], f"{name}.player2", extended=extended)
+    if extended:
+        _bool(state["dual_active"], f"{name}.dual_active")
     return state
 
 
@@ -266,6 +282,11 @@ def _validate_rich_observations(attempt: dict, clocks: dict, terminal_wall: floa
 
 def _load(path: str | Path) -> tuple[dict, str]:
     capture, source_sha256 = read_json(path)
+    version = capture.get("schema_version") if isinstance(capture, dict) else None
+    if type(version) is not int or version not in {1, 2, 3}:
+        raise ValueError("native capture schema_version must be integer 1, 2 or 3")
+    rich = version >= 2
+    extended = version == 3
     _fields(
         capture,
         "capture",
@@ -281,11 +302,9 @@ def _load(path: str | Path) -> tuple[dict, str]:
             "limitations",
             "integrity",
             "state_fields",
-        },
+        }
+        | ({"layer_state_fields"} if extended else set()),
     )
-    if type(capture["schema_version"]) is not int or capture["schema_version"] not in {1, 2}:
-        raise ValueError("native capture schema_version must be integer 1 or 2")
-    rich = capture["schema_version"] == 2
     if capture["kind"] != "native_capture":
         raise ValueError("Expected kind native_capture")
     provenance = _fields(
@@ -319,13 +338,16 @@ def _load(path: str | Path) -> tuple[dict, str]:
         _text(value, f"collector.{key}")
     sha256(collector["source_tree_sha256"], "collector.source_tree_sha256")
     fields = capture["state_fields"]
+    player_fields = PLAYER_FIELDS_V3 if extended else PLAYER_FIELDS
     if (
         not isinstance(fields, list)
-        or len(fields) != len(PLAYER_FIELDS)
+        or len(fields) != len(player_fields)
         or any(not isinstance(value, str) for value in fields)
-        or set(fields) != PLAYER_FIELDS
+        or set(fields) != player_fields
     ):
         raise ValueError("state_fields must declare the exact supported selected player fields")
+    if extended and capture["layer_state_fields"] != ["dual_active"]:
+        raise ValueError("layer_state_fields must declare exactly ['dual_active']")
     environment = _fields(
         capture["environment"],
         "environment",
@@ -350,7 +372,7 @@ def _load(path: str | Path) -> tuple[dict, str]:
     if environment["input_policy"] not in {INPUT_POLICY, LEGACY_INPUT_POLICY}:
         raise ValueError("Unsupported native capture input_policy")
     if rich and environment["input_policy"] != INPUT_POLICY:
-        raise ValueError("Schema 2 requires the owned native input policy")
+        raise ValueError("Schemas 2 and 3 require the owned native input policy")
     _bool(environment["configuration_complete"], "environment.configuration_complete")
     clocks = _fields(
         environment["clocks"],
@@ -535,10 +557,7 @@ def _load(path: str | Path) -> tuple[dict, str]:
         finite(row["dt_seconds"], f"trace[{index}].dt_seconds", minimum=0, maximum=60)
         _bool(row["is_half_tick"], f"trace[{index}].is_half_tick")
         _bool(row["is_last_tick"], f"trace[{index}].is_last_tick")
-        state = _fields(row["state"], f"trace[{index}].state", {"player1", "player2"})
-        _player(state["player1"], f"trace[{index}].state.player1")
-        if state["player2"] is not None:
-            _player(state["player2"], f"trace[{index}].state.player2")
+        _state(row["state"], f"trace[{index}].state", extended=extended)
         if index == 0 and (row["dt_seconds"] != 0 or row["is_half_tick"] or row["is_last_tick"]):
             raise ValueError(
                 "Initial trace must precede command processing with zero dt and false tick flags"
@@ -659,13 +678,13 @@ def _load(path: str | Path) -> tuple[dict, str]:
         raise ValueError("Blocked input wall timestamp is after the reported terminal callback")
     if rich:
         _validate_rich_observations(attempt, clocks, terminal_wall)
-    terminal_state = _fields(terminal["state"], "terminal.state", {"player1", "player2"})
-    _player(terminal_state["player1"], "terminal.state.player1")
-    if terminal_state["player2"] is not None:
-        _player(terminal_state["player2"], "terminal.state.player2")
+    terminal_state = _state(terminal["state"], "terminal.state", extended=extended)
     # Terminal-hook and post-process snapshots need not be equal: they are
     # intentionally captured at different points in the native call stack.
-    terminal_dead = any(state is not None and state["is_dead"] for state in terminal_state.values())
+    terminal_dead = any(
+        terminal_state[player] is not None and terminal_state[player]["is_dead"]
+        for player in ("player1", "player2")
+    )
     if terminal["outcome"] == "died" and not terminal_dead:
         raise ValueError("A native death requires a recorded dead player after destroyPlayer")
     if attempt["input_source"] == "replay":
@@ -712,13 +731,13 @@ def _blocked_signature(capture: dict) -> list[dict]:
     ]
 
 
-def _flat_player_fields(state: dict) -> dict:
+def _flat_player_fields(state: dict, player_fields: frozenset[str] = PLAYER_FIELDS) -> dict:
     """Expose each selected value independently, including player presence."""
     fields = {}
     for name in ("player1", "player2"):
         player = state[name]
         fields[f"{name}.present"] = player is not None
-        for key in sorted(PLAYER_FIELDS):
+        for key in sorted(player_fields):
             fields[f"{name}.{key}"] = None if player is None else player[key]
     return fields
 
@@ -769,15 +788,17 @@ def _trace_component_diagnostics(baseline: list[dict], compared: list[dict]) -> 
     }
 
 
-def _terminal_component_diagnostics(baseline: dict, compared: dict) -> dict:
+def _terminal_component_diagnostics(
+    baseline: dict, compared: dict, player_fields: frozenset[str] = PLAYER_FIELDS
+) -> dict:
     keys = ("outcome", "event", "command_index")
     left_callback = {key: baseline[key] for key in keys}
     right_callback = {key: compared[key] for key in keys}
-    left_fields = _flat_player_fields(baseline["state"])
-    right_fields = _flat_player_fields(compared["state"])
+    left_fields = _flat_player_fields(baseline["state"], player_fields)
+    right_fields = _flat_player_fields(compared["state"], player_fields)
     return {
         "callback_and_placement_equal": left_callback == right_callback,
-        "selected_player_fields_equal": baseline["state"] == compared["state"],
+        "selected_player_fields_equal": left_fields == right_fields,
         "callback_and_placement_differences": {
             key: {"baseline": left_callback[key], "compared": right_callback[key]}
             for key in keys
@@ -789,6 +810,19 @@ def _terminal_component_diagnostics(baseline: dict, compared: dict) -> dict:
             if left_fields[key] != right_fields[key]
         },
         "wall_elapsed_seconds_compared": False,
+        **(
+            {
+                "dual_active_equal": baseline["state"]["dual_active"] == compared["state"]["dual_active"],
+                "dual_active_difference": None
+                if baseline["state"]["dual_active"] == compared["state"]["dual_active"]
+                else {
+                    "baseline": baseline["state"]["dual_active"],
+                    "compared": compared["state"]["dual_active"],
+                },
+            }
+            if player_fields == PLAYER_FIELDS_V3
+            else {}
+        ),
     }
 
 
@@ -844,7 +878,7 @@ def _end_boundary(attempt: dict) -> tuple[dict | None, str | None]:
 
 
 def _pre_end_comparison(baseline: dict, compared: dict) -> dict:
-    if baseline["schema_version"] != 2:
+    if baseline["schema_version"] < 2:
         return {"status": "not_recorded_schema1", "full_comparison_influence": "none"}
     left, left_reason = _end_boundary(baseline["attempt"])
     right, right_reason = _end_boundary(compared["attempt"])
@@ -866,13 +900,14 @@ def _pre_end_comparison(baseline: dict, compared: dict) -> dict:
         }
     left_trace = baseline["attempt"]["trace"][: left["command_index"]]
     right_trace = compared["attempt"]["trace"][: right["command_index"]]
+    player_fields = frozenset(baseline["state_fields"])
     boundary_equal = _stream_signature([left], update=False) == _stream_signature([right], update=False)
     call_args = _trace_component_diagnostics(
         [_call_arguments(row) for row in left_trace], [_call_arguments(row) for row in right_trace]
     )
     players = _trace_component_diagnostics(
-        [_flat_player_fields(row["state"]) for row in left_trace],
-        [_flat_player_fields(row["state"]) for row in right_trace],
+        [_flat_player_fields(row["state"], player_fields) for row in left_trace],
+        [_flat_player_fields(row["state"], player_fields) for row in right_trace],
     )
     phases = _trace_component_diagnostics(
         [row["phase"] for row in left_trace], [row["phase"] for row in right_trace]
@@ -884,6 +919,14 @@ def _pre_end_comparison(baseline: dict, compared: dict) -> dict:
     inputs_equal = [
         row for row in _input_signature(baseline) if row["command_index"] < left["command_index"]
     ] == [row for row in _input_signature(compared) if row["command_index"] < right["command_index"]]
+    dual = (
+        _trace_component_diagnostics(
+            [{"dual_active": row["state"]["dual_active"]} for row in left_trace],
+            [{"dual_active": row["state"]["dual_active"]} for row in right_trace],
+        )
+        if baseline["schema_version"] == 3
+        else None
+    )
     return {
         **result,
         "status": "available",
@@ -893,14 +936,16 @@ def _pre_end_comparison(baseline: dict, compared: dict) -> dict:
         "player_field_diagnostics": players,
         "native_phase_diagnostics": phases,
         "recorded_context_diagnostics": contexts,
+        **({"dual_active_diagnostics": dual} if dual is not None else {}),
         "consistent": boundary_equal
         and inputs_equal
-        and all(item["equal"] for item in (call_args, players, phases, contexts)),
+        and all(item["equal"] for item in (call_args, players, phases, contexts))
+        and (dual is None or dual["equal"]),
     }
 
 
 def _rich_comparison(baseline: dict, compared: dict) -> dict:
-    if baseline["schema_version"] != 2:
+    if baseline["schema_version"] < 2:
         return {"status": "not_recorded_schema1"}
     a, b = baseline["attempt"], compared["attempt"]
     phase = _trace_component_diagnostics(
@@ -960,6 +1005,13 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         "No human performance, timing windows, difficulty probability or AR is inferred.",
         "A native phase prefix is diagnostic only and cannot close M1 or replace full recorded-subset comparison.",
     ]
+    if capture["schema_version"] == 3:
+        warnings[1] = (
+            "Recorded state covers selected player and layer fields, not complete world/trigger/input/clock state."
+        )
+        warnings.append(
+            "Schema 3 preserves raw gravity_inverted, vehicle_size, player_speed and dual_active; size categories, speed units and complete player lifecycle are not inferred."
+        )
     if capture["provenance"]["origin"] == "synthetic":
         warnings.insert(0, "SYNTHETIC capture fixture, not native Geometry Dash evidence.")
     if not capture["environment"]["configuration_complete"]:
@@ -983,11 +1035,15 @@ def _summary(capture: dict, source_sha256: str) -> dict:
             "The legacy input policy does not record owned-channel suppression or blocked-input diagnostics."
         )
     if capture["attempt"]["terminal"]["outcome"] == "completed" and any(
-        state is not None and state["is_dead"] for state in capture["attempt"]["terminal"]["state"].values()
+        capture["attempt"]["terminal"]["state"][player] is not None
+        and capture["attempt"]["terminal"]["state"][player]["is_dead"]
+        for player in ("player1", "player2")
     ):
         warnings.append(
             "A selected player dead flag is present at completion; player activity is not captured, "
             "so this flag cannot override the reported completion callback."
+            if capture["schema_version"] != 3
+            else "A selected player dead flag is present at completion; raw dual_active does not describe the complete player lifecycle, so this flag cannot override the reported completion callback."
         )
     return {
         "schema_version": 1,
@@ -1006,6 +1062,7 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         "collector": capture["collector"],
         "provenance": capture["provenance"],
         "state_fields": capture["state_fields"],
+        **({"layer_state_fields": capture["layer_state_fields"]} if capture["schema_version"] == 3 else {}),
         "attempt": {
             key: value
             for key, value in capture["attempt"].items()
@@ -1106,7 +1163,8 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
     base_plan = base["attempt"]["planned_inputs"]
     base_trace = base["attempt"]["trace"]
     base_call_arguments = [_call_arguments(row) for row in base_trace]
-    base_player_fields = [_flat_player_fields(row["state"]) for row in base_trace]
+    selected_player_fields = frozenset(base["state_fields"])
+    base_player_fields = [_flat_player_fields(row["state"], selected_player_fields) for row in base_trace]
     base_terminal = {
         key: value for key, value in base["attempt"]["terminal"].items() if key != "wall_elapsed_seconds"
     }
@@ -1133,10 +1191,19 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
             [_call_arguments(row) for row in capture_trace],
         )
         player_fields = _trace_component_diagnostics(
-            base_player_fields, [_flat_player_fields(row["state"]) for row in capture_trace]
+            base_player_fields,
+            [_flat_player_fields(row["state"], selected_player_fields) for row in capture_trace],
         )
         terminal_components = _terminal_component_diagnostics(
-            base["attempt"]["terminal"], capture["attempt"]["terminal"]
+            base["attempt"]["terminal"], capture["attempt"]["terminal"], selected_player_fields
+        )
+        dual = (
+            _trace_component_diagnostics(
+                [{"dual_active": row["state"]["dual_active"]} for row in base_trace],
+                [{"dual_active": row["state"]["dual_active"]} for row in capture_trace],
+            )
+            if base["schema_version"] == 3
+            else None
         )
         rich_components = _rich_comparison(base, capture)
         terminal_equal = {
@@ -1176,6 +1243,15 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
                 "terminal_equal": terminal_equal,
                 "terminal_callback_and_placement_equal": terminal_components["callback_and_placement_equal"],
                 "terminal_player_fields_equal": terminal_components["selected_player_fields_equal"],
+                **(
+                    {
+                        "recorded_dual_active_equal": dual["equal"],
+                        "dual_active_diagnostics": dual,
+                        "terminal_dual_active_equal": terminal_components["dual_active_equal"],
+                    }
+                    if dual is not None
+                    else {}
+                ),
                 "terminal_diagnostics": terminal_components,
                 "rich_observation_diagnostics": rich_components,
                 "pre_end_animation_diagnostics": _pre_end_comparison(base, capture),
@@ -1199,7 +1275,7 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
             "terminal_player_fields_equal",
         )
     }
-    if base["schema_version"] == 2:
+    if base["schema_version"] >= 2:
         for name, nested_key in (
             ("recorded_native_phase_equal", "native_phase_diagnostics"),
             ("recorded_update_context_equal", "recorded_context_diagnostics"),
@@ -1213,6 +1289,9 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
         component_consistency["terminal_phase_and_context_equal"] = all(
             row["rich_observation_diagnostics"]["terminal_phase_and_context_equal"] for row in comparisons
         )
+    if base["schema_version"] == 3:
+        for key in ("recorded_dual_active_equal", "terminal_dual_active_equal"):
+            component_consistency[key] = all(row[key] for row in comparisons)
     return {
         "schema_version": 1,
         "kind": "native_capture_comparison",
@@ -1261,7 +1340,9 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
             "Agreement concerns only selected recorded fields, not full engine determinism or restoration.",
             "Wall timestamps are excluded; reported dt/call sequence and terminal placement are compared exactly.",
             "Call arguments, selected player fields and terminal callback/state are reported separately; all must match exactly, including rotation, for subset consistency.",
-            "Schema 2 also compares delivered update/scheduler dt, recorded grouping, native phase flags/events and terminal context exactly.",
+            "Schema 2 also compares delivered update/scheduler dt, recorded grouping, native phase flags/events and terminal context exactly."
+            if base["schema_version"] != 3
+            else "Schema 3 also compares raw player gravity/size/speed and layer dual_active through terminal, plus all schema-2 rich observations exactly.",
             "Original update/scheduler dt and wall cadence are separately reported diagnostics and do not substitute for delivered call arguments.",
             "Pre-end-animation checks use a recorded native phase transition and never override the full result or establish M1.",
             *(

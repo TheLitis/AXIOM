@@ -9,6 +9,7 @@ import pytest
 
 from axiom.cli import main
 from axiom.native import (
+    LEGACY_INPUT_POLICY,
     canonical_sha256,
     compare_native_captures,
     inspect_native_capture,
@@ -198,6 +199,28 @@ def rich_capture(*, attempt_id="synthetic-attempt-1", policy="native"):
         ],
     )
     return data
+
+
+def mechanics_capture(*, attempt_id="synthetic-attempt-1", policy="native"):
+    """Schema-3 synthetic raw observations, with no inferred mechanic coverage."""
+    data = rich_capture(attempt_id=attempt_id, policy=policy)
+    data["schema_version"] = 3
+    data["state_fields"] += ["gravity_inverted", "vehicle_size", "player_speed"]
+    data["layer_state_fields"] = ["dual_active"]
+    for sample in [*data["attempt"]["trace"], data["attempt"]["terminal"]]:
+        sample["state"]["dual_active"] = False
+        for name in ("player1", "player2"):
+            if sample["state"][name] is not None:
+                sample["state"][name].update(gravity_inverted=False, vehicle_size=1.0, player_speed=0.9)
+    return data
+
+
+def mechanics_sample(document, sample):
+    return (
+        document["attempt"]["terminal"]["state"]
+        if sample == "terminal"
+        else document["attempt"]["trace"][sample]["state"]
+    )
 
 
 def save(tmp_path, document, filename="capture.json"):
@@ -1056,3 +1079,235 @@ def test_schema2_entry_timestamp_uses_existing_one_microsecond_allowance(tmp_pat
     else:
         with pytest.raises(ValueError, match="entry is after the reported terminal callback"):
             inspect(tmp_path, data)
+
+
+@pytest.mark.parametrize("policy", ["native", "fixed-base-60", "fixed-scheduler-240"])
+def test_schema3_raw_observations_keep_rich_clock_contract_without_certifying_coverage(tmp_path, policy):
+    data = mechanics_capture(policy=policy)
+    report = inspect(tmp_path, data)
+    assert report["capture_schema_version"] == 3
+    assert len(report["state_fields"]) == 9
+    assert report["layer_state_fields"] == ["dual_active"]
+    assert report["native_cadence_observations"]["status"] == "recorded"
+    assert report["native_cadence_observations"]["clock_identity"]["clock_policy"] == policy
+    assert report["terminal"]["state"] == data["attempt"]["terminal"]["state"]
+    assert report["status"] == "synthetic_fixture"
+    assert report["physics_status"] == "not_independently_verified"
+    assert report["m1_gate"] == "not_established_by_file_inspection"
+    assert any("speed units" in warning for warning in report["warnings"])
+    comparison = compare(tmp_path, data, mechanics_capture(policy=policy, attempt_id="other"))
+    assert comparison["status"] == "recorded_subset_consistent"
+    assert len(comparison["component_consistency"]) == 14
+    assert all(comparison["component_consistency"].values())
+    assert comparison["component_consistency"]["recorded_dual_active_equal"] is True
+    assert comparison["component_consistency"]["terminal_dual_active_equal"] is True
+    assert comparison["comparisons"][0]["pre_end_animation_diagnostics"]["consistent"] is True
+
+
+@pytest.mark.parametrize("sample", [0, 1, 2, "terminal"])
+@pytest.mark.parametrize("player_name", ["player1", "player2"])
+@pytest.mark.parametrize(
+    "field,value",
+    [("gravity_inverted", True), ("vehicle_size", 1.0000000000000002), ("player_speed", 0.9000000000000001)],
+)
+def test_schema3_every_selected_raw_player_field_affects_exact_comparison(
+    tmp_path, sample, player_name, field, value
+):
+    first = mechanics_capture()
+    second = mechanics_capture(attempt_id="other")
+    for data in (first, second):
+        for state in [row["state"] for row in data["attempt"]["trace"]] + [
+            data["attempt"]["terminal"]["state"]
+        ]:
+            state["player2"] = deepcopy(state["player1"])
+    mechanics_sample(second, sample)[player_name][field] = value
+    report = compare(tmp_path, first, second)
+    row = report["comparisons"][0]
+    assert report["status"] == "recorded_subset_inconsistent"
+    assert row["recorded_dual_active_equal"] is True
+    assert row["terminal_dual_active_equal"] is True
+    if sample == "terminal":
+        assert row["recorded_player_fields_equal"] is True
+        assert row["terminal_player_fields_equal"] is False
+        differences = row["terminal_diagnostics"]["selected_player_field_differences"]
+        assert differences[f"{player_name}.{field}"]["compared"] == value
+    else:
+        assert row["recorded_player_fields_equal"] is False
+        assert row["terminal_player_fields_equal"] is True
+        difference = row["player_field_diagnostics"]["field_differences"][f"{player_name}.{field}"]
+        assert difference["first_different_call_index"] == sample
+        assert difference["compared"] == value
+    prefix = row["pre_end_animation_diagnostics"]
+    assert prefix["status"] == "available"
+    assert prefix["consistent"] is (sample in {2, "terminal"})
+    assert prefix["full_comparison_influence"] == "none"
+
+
+@pytest.mark.parametrize("sample", [0, 1, 2, "terminal"])
+def test_schema3_layer_dual_changes_have_separate_diagnostics_and_fail_full_gate(tmp_path, sample):
+    first = mechanics_capture()
+    second = mechanics_capture(attempt_id="other")
+    mechanics_sample(second, sample)["dual_active"] = True
+    report = compare(tmp_path, first, second)
+    row = report["comparisons"][0]
+    assert report["status"] == "recorded_subset_inconsistent"
+    assert row["recorded_player_fields_equal"] is True
+    assert row["terminal_player_fields_equal"] is True
+    assert row["recorded_dual_active_equal"] is (sample == "terminal")
+    assert row["terminal_dual_active_equal"] is (sample != "terminal")
+    if sample == "terminal":
+        assert row["terminal_diagnostics"]["dual_active_difference"] == {"baseline": False, "compared": True}
+        assert row["terminal_diagnostics"]["selected_player_field_differences"] == {}
+    else:
+        difference = row["dual_active_diagnostics"]["field_differences"]["dual_active"]
+        assert difference["first_different_call_index"] == sample
+        assert difference["baseline"] is False and difference["compared"] is True
+    prefix = row["pre_end_animation_diagnostics"]
+    assert prefix["dual_active_diagnostics"]["equal"] is (sample in {2, "terminal"})
+    assert prefix["consistent"] is (sample in {2, "terminal"})
+    assert prefix["m1_gate"] == "not_established_by_prefix_comparison"
+
+
+@pytest.mark.parametrize("sample", [0, 1, 2, "terminal"])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("gravity_inverted", 0),
+        ("gravity_inverted", "false"),
+        ("gravity_inverted", None),
+        ("vehicle_size", True),
+        ("vehicle_size", "1.0"),
+        ("vehicle_size", None),
+        ("vehicle_size", float("nan")),
+        ("vehicle_size", float("inf")),
+        ("player_speed", False),
+        ("player_speed", "0.9"),
+        ("player_speed", None),
+        ("player_speed", float("-inf")),
+    ],
+)
+def test_schema3_raw_player_types_are_strict_in_every_sample(tmp_path, sample, field, value):
+    data = mechanics_capture()
+    mechanics_sample(data, sample)["player1"][field] = value
+    with pytest.raises(ValueError):
+        inspect(tmp_path, data)
+
+
+@pytest.mark.parametrize("sample", [0, 1, 2, "terminal"])
+@pytest.mark.parametrize("value", [0, 1, "false", None, [], {}])
+def test_schema3_dual_flag_is_required_boolean_in_every_sample(tmp_path, sample, value):
+    data = mechanics_capture()
+    mechanics_sample(data, sample)["dual_active"] = value
+    with pytest.raises(ValueError, match="dual_active"):
+        inspect(tmp_path, data)
+
+
+@pytest.mark.parametrize("sample", [0, 1, 2, "terminal"])
+@pytest.mark.parametrize("field", ["gravity_inverted", "vehicle_size", "player_speed", "dual_active"])
+def test_schema3_missing_raw_fields_never_receive_defaults(tmp_path, sample, field):
+    data = mechanics_capture()
+    state = mechanics_sample(data, sample)
+    target = state if field == "dual_active" else state["player1"]
+    target.pop(field)
+    with pytest.raises(ValueError, match=field):
+        inspect(tmp_path, data)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d.pop("layer_state_fields"),
+        lambda d: d.update(layer_state_fields=[]),
+        lambda d: d.update(layer_state_fields=["dual_active", "dual_active"]),
+        lambda d: d.update(layer_state_fields="dual_active"),
+        lambda d: d.update(layer_state_fields=["is_dual"]),
+        lambda d: d["state_fields"].remove("vehicle_size"),
+        lambda d: d["state_fields"].append("vehicle_size"),
+        lambda d: d["state_fields"].append("is_mini"),
+        lambda d: d["attempt"]["trace"][1]["state"].update(is_dual=False),
+        lambda d: d["attempt"]["terminal"]["state"]["player1"].update(is_mini=False),
+        lambda d: d["attempt"].pop("updates"),
+        lambda d: d["attempt"].pop("scheduler_updates"),
+        lambda d: d["attempt"].pop("phase_events"),
+        lambda d: d["attempt"]["trace"][1].pop("phase"),
+        lambda d: d["attempt"]["terminal"].pop("scheduler_sequence"),
+        lambda d: d["environment"].update(input_policy=LEGACY_INPUT_POLICY),
+        lambda d: d["attempt"]["scheduler_updates"][0].update(delivered_dt_seconds=1 / 240),
+        lambda d: d["attempt"]["terminal"].update(update_sequence=1),
+    ],
+)
+def test_schema3_exact_declarations_and_all_rich_contracts_remain_required(tmp_path, change):
+    data = mechanics_capture(policy="fixed-scheduler-240")
+    change(data)
+    refresh_environment(data)
+    with pytest.raises(ValueError):
+        inspect(tmp_path, data)
+
+
+@pytest.mark.parametrize("factory", [capture, rich_capture])
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d.update(layer_state_fields=["dual_active"]),
+        lambda d: d["attempt"]["trace"][0]["state"].update(dual_active=False),
+        lambda d: d["attempt"]["terminal"]["state"].update(dual_active=False),
+        lambda d: d["attempt"]["trace"][1]["state"]["player1"].update(gravity_inverted=False),
+        lambda d: d["attempt"]["terminal"]["state"]["player1"].update(vehicle_size=1.0),
+        lambda d: d["state_fields"].append("player_speed"),
+    ],
+)
+def test_schema1_and_schema2_reject_mechanics_fields_instead_of_silently_upgrading(tmp_path, factory, change):
+    data = factory()
+    change(data)
+    with pytest.raises(ValueError):
+        inspect(tmp_path, data)
+
+
+def test_schema3_raw_finite_values_are_preserved_without_size_or_speed_classification(tmp_path):
+    data = mechanics_capture()
+    for state in [row["state"] for row in data["attempt"]["trace"]] + [data["attempt"]["terminal"]["state"]]:
+        state["player1"].update(vehicle_size=1e-300, player_speed=-1e300)
+        state["dual_active"] = True
+    data["attempt"]["terminal"]["state"]["dual_active"] = False
+    report = inspect(tmp_path, data)
+    assert report["terminal"]["state"]["player1"]["vehicle_size"] == 1e-300
+    assert report["terminal"]["state"]["player1"]["player_speed"] == -1e300
+    assert report["terminal"]["state"]["player2"] is None
+    assert report["terminal"]["state"]["dual_active"] is False
+    assert report["m1_gate"] == "not_established_by_file_inspection"
+    assert "is_mini" not in report["terminal"]["state"]["player1"]
+    assert "speed_units" not in report
+
+
+def test_schema3_death_and_completion_checks_do_not_treat_layer_boolean_as_player(tmp_path):
+    data = mechanics_capture()
+    data["attempt"]["terminal"].update(outcome="died", event="PlayLayer::destroyPlayer")
+    data["attempt"]["terminal"]["state"]["player1"]["is_dead"] = True
+    report = inspect(tmp_path, data)
+    assert report["terminal"]["outcome"] == "died"
+    data["attempt"]["terminal"]["state"]["player1"]["is_dead"] = False
+    with pytest.raises(ValueError, match="recorded dead player"):
+        inspect(tmp_path, data)
+    data = mechanics_capture()
+    data["attempt"]["terminal"]["state"]["player2"] = deepcopy(
+        data["attempt"]["terminal"]["state"]["player1"]
+    )
+    data["attempt"]["terminal"]["state"]["player2"]["is_dead"] = True
+    assert any("complete player lifecycle" in warning for warning in inspect(tmp_path, data)["warnings"])
+
+
+def test_schema2_comparison_components_and_inspection_do_not_fabricate_layer_fields(tmp_path):
+    data = rich_capture()
+    report = inspect(tmp_path, data)
+    assert "layer_state_fields" not in report
+    assert "dual_active" not in report["terminal"]["state"]
+    comparison = compare(tmp_path, data, rich_capture(attempt_id="other"))
+    assert len(comparison["component_consistency"]) == 12
+    assert "recorded_dual_active_equal" not in comparison["component_consistency"]
+    assert "dual_active_diagnostics" not in comparison["comparisons"][0]
+    assert "dual_active_equal" not in comparison["comparisons"][0]["terminal_diagnostics"]
+
+
+def test_schema2_and_schema3_cannot_be_compared_as_compatible_recorded_state(tmp_path):
+    with pytest.raises(ValueError, match="schema_version"):
+        compare(tmp_path, rich_capture(), mechanics_capture(attempt_id="other"))
