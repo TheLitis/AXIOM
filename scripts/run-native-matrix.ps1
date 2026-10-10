@@ -12,7 +12,9 @@ $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $workspace '.venv/Scripts/python.exe'
 if (-not (Test-Path -LiteralPath $python)) { throw 'Run uv sync --locked --extra dev first.' }
-if (Get-Process AXIOMSandbox -ErrorAction SilentlyContinue) { throw 'Existing sandbox process; finish that experiment first.' }
+if (@(Get-Process AXIOMSandbox -ErrorAction SilentlyContinue | Where-Object { -not $_.HasExited }).Count) {
+    throw 'Existing active sandbox process; finish that experiment first.'
+}
 if (-not $MatrixPath) { $MatrixPath = Join-Path $workspace 'examples/native/fixture-matrix.json' }
 $matrixFile = (Resolve-Path -LiteralPath $MatrixPath).Path
 if ($OutputDirectory) {
@@ -51,6 +53,7 @@ $captures = Join-Path $profile 'captures'
 . (Join-Path $PSScriptRoot 'native-experiment-state.ps1')
 $snapshot = Get-AxiomExperimentSnapshot $workspace
 $results = @()
+$priorExecutionState = $null
 
 function Invoke-MatrixCapture($Case, $Run, [int]$Index, [string]$Directory) {
     $before = @{}
@@ -113,6 +116,14 @@ function Invoke-MatrixCapture($Case, $Run, [int]$Index, [string]$Directory) {
 }
 
 try {
+    # Keep the desktop graphics environment awake only for this experiment.
+    # This does not change the user's power plan or inject game/UI input.
+    if (-not ('AxiomMatrixPower' -as [type])) {
+        Add-Type -Name AxiomMatrixPower -Namespace '' -MemberDefinition '[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint flags);'
+    }
+    $priorExecutionState = [AxiomMatrixPower]::SetThreadExecutionState([uint32]2147483651)
+    if (-not $priorExecutionState) { throw 'Unable to request a usable system/display execution state.' }
+    Write-Host 'Temporary system/display execution-state request active for matrix.'
     & (Join-Path $PSScriptRoot 'prepare-native-sandbox.ps1') -GameDirectory $GameDirectory
     foreach ($case in $cases) {
         $casePath = Join-Path $out $case.id
@@ -177,6 +188,7 @@ try {
         source_specification_sha256 = $sourceSpecificationHash
         specification_sha256 = (Get-FileHash -LiteralPath $validatedPath -Algorithm SHA256).Hash.ToLowerInvariant()
         clock_policy = $ClockPolicy; repetitions_per_replay = $Repetitions
+        startup_execution_state = 'system_and_display_required_during_matrix'
         status = if ($passedAll) { 'declared_matrix_recorded_subset_passed' } else { 'declared_matrix_not_established' }
         cases = $results
         limitations = @('Selected mode/state observations are not a complete physics or environment model.',
@@ -187,4 +199,13 @@ try {
     Write-Output "Native fixture matrix: $($manifest.status)"
     Write-Output "Matrix evidence: $out"
     if (-not $passedAll) { throw 'Matrix gate remains open; all comparison and observation failures retained.' }
-} finally { Restore-AxiomExperimentSnapshot $snapshot }
+} finally {
+    try { Restore-AxiomExperimentSnapshot $snapshot }
+    finally {
+        if ($priorExecutionState) {
+            if (-not [AxiomMatrixPower]::SetThreadExecutionState($priorExecutionState)) {
+                throw 'Unable to restore previous thread execution-state request.'
+            }
+        }
+    }
+}
