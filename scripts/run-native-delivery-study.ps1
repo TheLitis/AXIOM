@@ -144,16 +144,16 @@ function Invoke-StudyAnalysis([string[]]$AnalysisArguments, [string]$Stem) {
     $argumentLine = (@($AnalysisArguments | ForEach-Object { Quote-StudyArgument $_ }) -join ' ')
     $process = Start-Process -FilePath $python -WorkingDirectory $workspace -ArgumentList $argumentLine -WindowStyle Hidden -PassThru -RedirectStandardOutput $record.stdout_path -RedirectStandardError $record.stderr_path
     try {
+        # Cache the native handle before waiting: Windows PowerShell 5 can
+        # otherwise return null ExitCode for the Start-Process PassThru object.
+        $analysisHandle = $process.Handle
         if (-not $process.WaitForExit(120000)) { throw 'Analysis process timed out; diagnostic output is retained.' }
         $record.exit_code = $process.ExitCode
-        if ($process.ExitCode -ne 0) { throw "Analysis failed structurally (exit $($process.ExitCode)); see $($record.stderr_path)" }
+        if ($null -eq $record.exit_code) { throw 'Analysis process exited without a readable exit code; diagnostic output is retained.' }
+        if ($record.exit_code -ne 0) { throw "Analysis failed structurally (exit $($record.exit_code)); see $($record.stderr_path)" }
     } finally {
-        if (-not $process.HasExited) {
-            Stop-Process -InputObject $process -Force
-            if (-not $process.WaitForExit(5000)) { throw 'Owned analysis process cleanup timed out.' }
-        }
-        $record.finished_at_utc = [DateTime]::UtcNow.ToString('o')
-        $process.Dispose()
+        try { Stop-AxiomOwnedProcess $process }
+        finally { $record.finished_at_utc = [DateTime]::UtcNow.ToString('o') }
     }
 }
 function Invoke-StudyCapture($Selection, [int]$Index, $Record, [string]$Directory) {
