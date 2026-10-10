@@ -6,6 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+from test_native import collision_capture, mechanic_event
 
 from axiom.fixtures import (
     compare_fixture_response,
@@ -76,6 +77,69 @@ def capture_v3(*, replay=True, plan=True):
             if state[player] is not None:
                 state[player].update(gravity_inverted=False, vehicle_size=1.0, player_speed=0.9)
     return result
+
+
+def matrix_v3():
+    result = matrix_v2()
+    result["schema_version"] = 3
+    result["cases"][0]["watch_groups"] = [1]
+    for run in result["cases"][0]["runs"]:
+        run["required_state_witnesses"] = [
+            {
+                "id": "grounded-cube",
+                "player": 1,
+                "mode": "cube",
+                "command_window": {"first": 0, "last": 2},
+                "min_samples": 1,
+                "predicates": {
+                    "is_on_ground": True,
+                    "is_on_slope": False,
+                    "gravity_inverted": False,
+                    "vehicle_size": 1.0,
+                    "player_speed": 0.9,
+                    "dual_active": False,
+                    "y": {"minimum": 100.0, "maximum": 110.0},
+                },
+            }
+        ]
+        run["required_effect_checks"] = []
+    return result
+
+
+def capture_v4(*, replay=True, plan=True, driver=None):
+    evidence = collision_capture(driver=driver or ("owned-pre-command" if replay else "none"))
+    evidence["challenge"]["level_sha256"] = matrix()["cases"][0]["level_sha256"]
+    if not plan:
+        evidence["attempt"].update(planned_inputs=[], inputs=[])
+    return evidence
+
+
+def effect_check(*, event="PlayerObject::collidedWithObject"):
+    check = {
+        "id": "applied-contact",
+        "event": event,
+        "player": 1,
+        "object_group_id": 1,
+        "command_window": {"first": 1, "last": 3},
+        "min_events": 1,
+        "native_return": True,
+        "player_change": {"field": "is_on_ground", "before": False, "after": True},
+        "target_change": None,
+    }
+    if event != "PlayerObject::collidedWithObject":
+        check["native_return"] = None
+    if event == "PlayerObject::collidedWithSlopeInternal":
+        check["player_change"]["field"] = "is_on_slope"
+    if event == "PlayLayer::destroyPlayer":
+        check["player_change"]["field"] = "is_dead"
+    if event.startswith("GJBaseGameLayer::"):
+        check.update(
+            player=None,
+            object_group_id=None,
+            player_change=None,
+            target_change={"group_id": 1, "field": "y", "before": 90.0, "after": 120.0},
+        )
+    return check
 
 
 def save(path, data):
@@ -155,7 +219,7 @@ def test_portal_specs_require_actual_mode_and_do_not_invent_return_transition(mo
     assert get_fixture_case(result, mode + "-portal")["response_checks"][0]["mode"] == mode
 
 
-@pytest.mark.parametrize("version", [True, 1.0, 3, "1"])
+@pytest.mark.parametrize("version", [True, 1.0, 4, "1"])
 def test_version_is_strict_integer(version):
     data = matrix()
     data["schema_version"] = version
@@ -748,3 +812,242 @@ def test_versioned_mechanics_field_shapes_are_exact():
     ]
     with pytest.raises(ValueError, match="requires exactly"):
         validate_fixture_matrix(spec)
+
+
+def test_matrix3_joint_witness_matches_one_actual_pre_ending_sample(tmp_path):
+    spec, evidence = matrix_v3(), capture_v4()
+    result = inspect(tmp_path, spec=spec, evidence=evidence)
+    assert result["schema_version"] == 3
+    assert result["status"] == "fixture_observations_match"
+    assert result["checks"]["watch_groups_match"]
+    witness = result["state_witness_checks"][0]
+    assert witness["matching_command_indices"] == [0, 1]
+    assert witness["first_matching_sample"]["observed_predicates"]["is_on_ground"] is True
+    assert get_fixture_run(spec, "cube-flat", "replay")["watch_groups"] == [1]
+
+
+def test_matrix3_separate_matching_flags_cannot_satisfy_joint_contact_witness(tmp_path):
+    spec, evidence = matrix_v3(), capture_v4()
+    spec["cases"][0]["runs"][1]["required_state_witnesses"][0]["predicates"]["is_on_slope"] = True
+    evidence["attempt"]["trace"][1]["state"]["player1"].update(is_on_ground=False, is_on_slope=True)
+    result = inspect(tmp_path, spec=spec, evidence=evidence)
+    assert result["state_witness_checks"][0]["matching_sample_count"] == 0
+    assert result["status"] == "fixture_observations_mismatch"
+
+
+def test_matrix3_end_animation_or_outside_y_window_cannot_satisfy_contact_witness(tmp_path):
+    spec, evidence = matrix_v3(), capture_v4()
+    witness = spec["cases"][0]["runs"][1]["required_state_witnesses"][0]
+    witness["predicates"]["is_on_slope"] = True
+    evidence["attempt"]["trace"][2]["state"]["player1"]["is_on_slope"] = True
+    result = inspect(tmp_path, spec=spec, evidence=evidence)
+    assert not result["state_witness_checks"][0]["matched"]
+    witness["predicates"]["is_on_slope"] = False
+    witness["predicates"]["y"] = {"minimum": 105.1, "maximum": 106}
+    assert not inspect(tmp_path, spec=spec, evidence=evidence)["state_witness_checks"][0]["matched"]
+
+
+def test_matrix3_inactive_player2_pointer_cannot_satisfy_joint_witness(tmp_path):
+    spec, evidence = matrix_v3(), capture_v4()
+    witness = spec["cases"][0]["runs"][1]["required_state_witnesses"][0]
+    witness["player"] = 2
+    witness["predicates"]["dual_active"] = None
+    for row in evidence["attempt"]["trace"]:
+        row["state"]["player2"] = deepcopy(row["state"]["player1"])
+    assert not inspect(tmp_path, spec=spec, evidence=evidence)["state_witness_checks"][0]["matched"]
+    evidence["attempt"]["trace"][1]["state"]["dual_active"] = True
+    spec["cases"][0]["runs"][1]["required_mechanics_sequences"]["dual_active"] = [False, True]
+    assert inspect(tmp_path, spec=spec, evidence=evidence)["state_witness_checks"][0]["matched"]
+
+
+@pytest.mark.parametrize("legacy", [capture, capture_v3])
+def test_matrix3_legacy_capture_contact_fields_are_unavailable(tmp_path, legacy):
+    result = inspect(tmp_path, spec=matrix_v3(), evidence=legacy())
+    assert not result["checks"]["native_contact_effect_fields_available"]
+    assert not result["state_witness_checks"][0]["available"]
+    assert result["state_witness_checks"][0]["first_matching_sample"] is None
+    assert result["status"] == "fixture_observations_mismatch"
+
+
+def test_matrix3_collision_requires_changed_actor_field_and_true_native_return(tmp_path):
+    spec, evidence = matrix_v3(), capture_v4()
+    spec["cases"][0]["runs"][1]["required_effect_checks"] = [effect_check()]
+    evidence["attempt"]["mechanic_events"] = [mechanic_event(evidence)]
+    result = inspect(tmp_path, spec=spec, evidence=evidence)
+    assert result["status"] == "fixture_observations_match"
+    assert result["effect_checks"][0]["matching_event_sequences"] == [0]
+    event = evidence["attempt"]["mechanic_events"][0]
+    event["native_return"] = False
+    assert not inspect(tmp_path, spec=spec, evidence=evidence)["effect_checks"][0]["matched"]
+    event["native_return"] = True
+    event["state_before"]["player1"]["is_on_ground"] = True
+    assert not inspect(tmp_path, spec=spec, evidence=evidence)["effect_checks"][0]["matched"]
+
+
+@pytest.mark.parametrize("event", ["PlayerObject::collidedWithSlopeInternal", "PlayLayer::destroyPlayer"])
+def test_matrix3_slope_and_death_require_actual_actor_transition(tmp_path, event):
+    spec, evidence = matrix_v3(), capture_v4()
+    requirement = effect_check(event=event)
+    spec["cases"][0]["runs"][1]["required_effect_checks"] = [requirement]
+    record = mechanic_event(evidence, event=event)
+    field = requirement["player_change"]["field"]
+    record["state_before"]["player1"][field] = False
+    record["state_after"]["player1"][field] = True
+    evidence["attempt"]["mechanic_events"] = [record]
+    result = inspect(tmp_path, spec=spec, evidence=evidence)
+    assert result["effect_checks"][0]["witnesses"][0]["player_transition"]["field"] == field
+    record["object"]["group_ids"] = [2]
+    assert not inspect(tmp_path, spec=spec, evidence=evidence)["effect_checks"][0]["matched"]
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        "GJBaseGameLayer::triggerMoveCommand",
+        "GJBaseGameLayer::toggleGroup",
+        "GJBaseGameLayer::toggleGroupTriggered",
+        "GJBaseGameLayer::spawnGroup",
+    ],
+)
+def test_matrix3_group_callback_presence_alone_never_satisfies_applied_effect(tmp_path, event):
+    spec, evidence = matrix_v3(), capture_v4()
+    spec["cases"][0]["runs"][1]["required_effect_checks"] = [effect_check(event=event)]
+    record = mechanic_event(evidence, event=event)
+    evidence["attempt"]["mechanic_events"] = [record]
+    assert not inspect(tmp_path, spec=spec, evidence=evidence)["effect_checks"][0]["matched"]
+    record["watched_after"][0]["y"] = 120
+    result = inspect(tmp_path, spec=spec, evidence=evidence)
+    transition = result["effect_checks"][0]["witnesses"][0]["target_transition"]
+    assert transition["source"] == "paired_native_callback"
+    assert transition["before"] == 90
+    assert transition["after"] == 120
+
+
+def test_matrix3_actual_toggle_group_requires_watched_raw_flag_transition(tmp_path):
+    spec, evidence = matrix_v3(), capture_v4()
+    requirement = effect_check(event="GJBaseGameLayer::toggleGroup")
+    requirement["target_change"] = {
+        "group_id": 1,
+        "field": "is_group_disabled",
+        "before": False,
+        "after": True,
+    }
+    spec["cases"][0]["runs"][1]["required_effect_checks"] = [requirement]
+    record = mechanic_event(evidence, event="GJBaseGameLayer::toggleGroup")
+    record["watched_after"][0]["is_group_disabled"] = True
+    evidence["attempt"]["mechanic_events"] = [record]
+    result = inspect(tmp_path, spec=spec, evidence=evidence)
+    assert result["effect_checks"][0]["witnesses"][0]["target_transition"]["after"] is True
+    record["arguments"]["group"] = 2
+    assert not inspect(tmp_path, spec=spec, evidence=evidence)["effect_checks"][0]["matched"]
+
+
+def add_later_pre_ending_sample(evidence):
+    later = deepcopy(evidence["attempt"]["trace"][1])
+    later["command_index"] = 2
+    evidence["attempt"]["trace"][2]["command_index"] = 3
+    evidence["attempt"]["trace"].insert(2, later)
+    evidence["attempt"]["terminal"]["command_index"] = 3
+    evidence["attempt"]["updates"][0]["command_index_after"] = 3
+    evidence["attempt"]["scheduler_updates"][0]["command_index_after"] = 3
+    evidence["attempt"]["phase_events"][0]["command_index"] = 3
+    return later
+
+
+def test_matrix3_async_target_transition_requires_strictly_later_pre_ending_command(tmp_path):
+    spec, evidence = matrix_v3(), capture_v4()
+    spec["cases"][0]["runs"][1]["required_effect_checks"] = [
+        effect_check(event="GJBaseGameLayer::triggerMoveCommand")
+    ]
+    record = mechanic_event(evidence, event="GJBaseGameLayer::triggerMoveCommand")
+    evidence["attempt"]["mechanic_events"] = [record]
+    # A same-counter trace cannot establish that it followed the callback.
+    evidence["attempt"]["trace"][1]["watched_objects"][0]["y"] = 120
+    assert not inspect(tmp_path, spec=spec, evidence=evidence)["effect_checks"][0]["matched"]
+    later = add_later_pre_ending_sample(evidence)
+    later["watched_objects"][0]["y"] = 120
+    result = inspect(tmp_path, spec=spec, evidence=evidence)
+    transition = result["effect_checks"][0]["witnesses"][0]["target_transition"]
+    assert transition["source"] == "later_pre_ending_command_sample"
+    assert transition["command_index"] == 2
+    assert result["effect_checks"][0]["witnesses"][0]["event_command_index"] == 1
+    later["phase"]["level_end_animation_started"] = True
+    assert not inspect(tmp_path, spec=spec, evidence=evidence)["effect_checks"][0]["matched"]
+
+
+def test_matrix3_target_receipt_group_and_command_window_must_match(tmp_path):
+    spec, evidence = matrix_v3(), capture_v4()
+    check = effect_check(event="GJBaseGameLayer::triggerMoveCommand")
+    spec["cases"][0]["runs"][1]["required_effect_checks"] = [check]
+    record = mechanic_event(evidence, event=check["event"])
+    record["watched_after"][0]["y"] = 120
+    record["arguments"]["target_group_id"] = 2
+    evidence["attempt"]["mechanic_events"] = [record]
+    assert not inspect(tmp_path, spec=spec, evidence=evidence)["effect_checks"][0]["matched"]
+    record["arguments"]["target_group_id"] = 1
+    check["command_window"]["first"] = 2
+    assert not inspect(tmp_path, spec=spec, evidence=evidence)["effect_checks"][0]["matched"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d["cases"][0].update(watch_groups=[1, 1]),
+        lambda d: d["cases"][0].update(watch_groups=[True]),
+        lambda d: d["cases"][0]["runs"][1].update(required_state_witnesses=[], required_effect_checks=[]),
+        lambda d: d["cases"][0]["runs"][1]["required_state_witnesses"][0].update(min_samples=True),
+        lambda d: d["cases"][0]["runs"][1]["required_state_witnesses"][0].update(min_samples=4),
+        lambda d: d["cases"][0]["runs"][1]["required_state_witnesses"][0]["predicates"].update(
+            is_on_ground=1
+        ),
+        lambda d: d["cases"][0]["runs"][1]["required_state_witnesses"][0]["predicates"].update(
+            is_on_ground=None, is_on_slope=None
+        ),
+        lambda d: d["cases"][0]["runs"][1]["required_state_witnesses"][0]["predicates"].update(
+            y={"minimum": 106, "maximum": 105}
+        ),
+        lambda d: d["cases"][0]["runs"][1]["required_effect_checks"][0].update(
+            event="EffectGameObject::triggerObject"
+        ),
+        lambda d: d["cases"][0]["runs"][1]["required_effect_checks"][0].update(native_return=False),
+        lambda d: d["cases"][0]["runs"][1]["required_effect_checks"][0].update(player_change=None),
+        lambda d: d["cases"][0]["runs"][1]["required_effect_checks"][0].update(object_group_id=2),
+        lambda d: d["cases"][0]["runs"][1]["required_effect_checks"][0]["player_change"].update(before=True),
+    ],
+)
+def test_matrix3_strict_joint_and_effect_declarations_reject_invalid_constraints(change):
+    spec = matrix_v3()
+    spec["cases"][0]["runs"][1]["required_effect_checks"] = [effect_check()]
+    change(spec)
+    with pytest.raises(ValueError):
+        validate_fixture_matrix(spec)
+
+
+def test_matrix3_can_freeze_empty_owned_trigger_plans_without_input_response_claims(tmp_path):
+    spec = matrix_v3()
+    spec["cases"][0]["response_checks"] = []
+    for run in spec["cases"][0]["runs"]:
+        run["inputs"] = []
+    evidence = capture_v4(plan=False)
+    assert inspect(tmp_path, spec=spec, evidence=evidence)["status"] == "fixture_observations_match"
+
+
+def test_schema4_ui_receipts_cannot_become_owned_fixture_response_evidence(tmp_path):
+    spec = matrix_v2()
+    reference, changed = capture_v4(plan=False), capture_v4(driver="scheduled-ui-callback")
+    changed["attempt"]["trace"][1]["state"]["player1"]["y"] += 1
+    result = response(tmp_path, spec=spec, reference=reference, changed=changed)
+    assert result["first_difference"] is not None
+    assert not result["checks"]["owned_replay_delivery_in_both_captures"]
+    assert not result["checks"]["changed_requirements_match"]
+    assert result["status"] == "selected_response_not_established"
+
+
+def test_schema4_watched_initial_or_prefix_difference_blocks_owned_response(tmp_path):
+    reference, changed = capture_v4(plan=False), capture_v4()
+    changed["attempt"]["trace"][1]["state"]["player1"]["y"] += 1
+    changed["attempt"]["trace"][0]["watched_objects"][0]["y"] += 1
+    result = response(tmp_path, spec=matrix_v2(), reference=reference, changed=changed)
+    assert not result["checks"]["same_selected_initial_watched_objects"]
+    assert not result["checks"]["same_watched_prefix_before_changed_input"]
+    assert result["status"] == "selected_response_not_established"

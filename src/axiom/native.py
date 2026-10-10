@@ -20,10 +20,16 @@ MAX_PLANNED_INPUTS = 4_000
 MAX_COMPARISON_FILES = 16
 MAX_UPDATE_RECORDS = 20_000
 MAX_PHASE_EVENTS = 256
+MAX_MECHANIC_EVENTS = 4_096
+MAX_DELIVERY_EVENTS = 4_096
+MAX_OBJECT_WATCHES = 8
+MAX_QUEUED_BUTTONS = 256
 INPUT_POLICY = "process-commands-pre-hook-owned-input-v1"
+INPUT_POLICY_V4 = "process-commands-scheduled-delivery-v2"
 LEGACY_INPUT_POLICY = "process-commands-pre-hook-v1"
 PLAYER_FIELDS = frozenset({"x", "y", "y_velocity", "rotation", "is_dead", "mode"})
 PLAYER_FIELDS_V3 = PLAYER_FIELDS | {"gravity_inverted", "vehicle_size", "player_speed"}
+PLAYER_FIELDS_V4 = PLAYER_FIELDS_V3 | {"is_on_ground", "is_on_slope"}
 LAYER_FIELDS_V3 = frozenset({"dual_active"})
 PHASE_FIELDS = frozenset({"level_end_animation_started", "has_completed_level"})
 
@@ -79,8 +85,10 @@ def _text(value: Any, name: str) -> str:
     return result
 
 
-def _player(value: Any, name: str, *, extended: bool = False) -> dict:
-    state = _fields(value, name, PLAYER_FIELDS_V3 if extended else PLAYER_FIELDS)
+def _player(value: Any, name: str, *, extended: bool = False, contacts: bool = False) -> dict:
+    state = _fields(
+        value, name, PLAYER_FIELDS_V4 if contacts else PLAYER_FIELDS_V3 if extended else PLAYER_FIELDS
+    )
     for key in ("x", "y", "y_velocity", "rotation"):
         finite(state[key], f"{name}.{key}")
     _bool(state["is_dead"], f"{name}.is_dead")
@@ -89,14 +97,17 @@ def _player(value: Any, name: str, *, extended: bool = False) -> dict:
         _bool(state["gravity_inverted"], f"{name}.gravity_inverted")
         for key in ("vehicle_size", "player_speed"):
             finite(state[key], f"{name}.{key}")
+    if contacts:
+        for key in ("is_on_ground", "is_on_slope"):
+            _bool(state[key], f"{name}.{key}")
     return state
 
 
-def _state(value: Any, name: str, *, extended: bool = False) -> dict:
+def _state(value: Any, name: str, *, extended: bool = False, contacts: bool = False) -> dict:
     state = _fields(value, name, {"player1", "player2"} | (LAYER_FIELDS_V3 if extended else set()))
-    _player(state["player1"], f"{name}.player1", extended=extended)
+    _player(state["player1"], f"{name}.player1", extended=extended, contacts=contacts)
     if state["player2"] is not None:
-        _player(state["player2"], f"{name}.player2", extended=extended)
+        _player(state["player2"], f"{name}.player2", extended=extended, contacts=contacts)
     if extended:
         _bool(state["dual_active"], f"{name}.dual_active")
     return state
@@ -280,13 +291,327 @@ def _validate_rich_observations(attempt: dict, clocks: dict, terminal_wall: floa
                     raise ValueError("Phase event is outside its recorded enclosing context")
 
 
+def _raw_int(value: Any, name: str) -> int:
+    return _int(value, name, minimum=-(2**31), maximum=2**31 - 1)
+
+
+def _groups(value: Any, name: str, *, remap: bool = False) -> list:
+    if not isinstance(value, list) or len(value) > 64:
+        raise ValueError(f"{name} must contain at most 64 values")
+    for item in value:
+        if remap:
+            _raw_int(item, name)
+        else:
+            _int(item, name, minimum=1, maximum=9999)
+    if not remap and value != sorted(set(value)):
+        raise ValueError(f"{name} must contain sorted unique positive group IDs")
+    return value
+
+
+def _watched_objects(value: Any, watches: list[dict], name: str) -> list:
+    if not isinstance(value, list) or len(value) != len(watches):
+        raise ValueError(f"{name} must contain exactly the declared watches in order")
+    for row, declaration in zip(value, watches):
+        _fields(row, name, {"group_id", "x", "y", "is_group_disabled", "is_disabled"})
+        if _int(row["group_id"], f"{name}.group_id", 1, 9999) != declaration["group_id"]:
+            raise ValueError(f"{name} group order differs from object_watches")
+        for field in ("x", "y"):
+            finite(row[field], f"{name}.{field}")
+        for field in ("is_group_disabled", "is_disabled"):
+            _bool(row[field], f"{name}.{field}")
+    return value
+
+
+def _queue(value: Any, name: str) -> list:
+    if not isinstance(value, list) or len(value) > MAX_QUEUED_BUTTONS:
+        raise ValueError(f"{name} must contain at most {MAX_QUEUED_BUTTONS} native queue records")
+    for row in value:
+        _fields(row, name, {"button", "pressed", "player", "step", "timestamp"})
+        _raw_int(row["button"], f"{name}.button")
+        _raw_int(row["step"], f"{name}.step")
+        _int(row["player"], f"{name}.player", 1, 2)
+        _bool(row["pressed"], f"{name}.pressed")
+        finite(row["timestamp"], f"{name}.timestamp")
+    return value
+
+
+def _mechanic_arguments(row: dict) -> None:
+    event, args = row["event"], row["arguments"]
+    keys = {
+        "PlayerObject::collidedWithObject": {"dt_seconds", "rect", "skip_check"},
+        "PlayerObject::updateCollide": {"direction"},
+        "PlayerObject::collidedWithSlopeInternal": {"dt_seconds", "forced"},
+        "PlayLayer::destroyPlayer": set(),
+        "GJBaseGameLayer::triggerMoveCommand": {
+            "target_group_id",
+            "duration",
+            "move_offset_x",
+            "move_offset_y",
+        },
+        "GJBaseGameLayer::toggleGroupTriggered": {
+            "group",
+            "activate",
+            "remap_keys",
+            "trigger_id",
+            "control_id",
+        },
+        "GJBaseGameLayer::toggleGroup": {"group", "activate"},
+        "GJBaseGameLayer::spawnGroup": {
+            "group",
+            "ordered",
+            "delay",
+            "remap_keys",
+            "trigger_id",
+            "control_id",
+        },
+        "EffectGameObject::triggerObject": {"unique_id", "remap_keys"},
+    }
+    if not isinstance(event, str) or event not in keys:
+        raise ValueError("Unsupported native mechanic event")
+    _fields(args, "mechanic.arguments", keys[event])
+    actor_event = event in {
+        "PlayerObject::collidedWithObject",
+        "PlayerObject::updateCollide",
+        "PlayLayer::destroyPlayer",
+        "PlayerObject::collidedWithSlopeInternal",
+    }
+    if actor_event:
+        _int(row["player"], "mechanic.player", 1, 2)
+    elif row["player"] is not None:
+        raise ValueError("A layer/trigger mechanic event cannot declare an actor")
+    if event in {
+        "GJBaseGameLayer::toggleGroup",
+        "GJBaseGameLayer::toggleGroupTriggered",
+        "GJBaseGameLayer::spawnGroup",
+    }:
+        if row["object"] is not None:
+            raise ValueError("Group hook events do not identify a trigger object")
+    if event == "PlayerObject::collidedWithSlopeInternal" and row["object"] is None:
+        raise ValueError("A watched slope callback requires its actual native object")
+    if event == "PlayerObject::collidedWithObject":
+        _bool(row["native_return"], "mechanic.native_return")
+        finite(args["dt_seconds"], "mechanic.dt_seconds", minimum=0, maximum=60)
+        rect = _fields(args["rect"], "mechanic.rect", {"x", "y", "width", "height"})
+        for field, value in rect.items():
+            finite(value, f"mechanic.rect.{field}")
+        _bool(args["skip_check"], "mechanic.skip_check")
+    elif row["native_return"] is not None:
+        raise ValueError("A void mechanic hook cannot claim a native return")
+    if event == "PlayerObject::updateCollide":
+        _int(args["direction"], "mechanic.direction", 0, 3)
+    if event == "PlayerObject::collidedWithSlopeInternal":
+        finite(args["dt_seconds"], "mechanic.dt_seconds", minimum=0, maximum=60)
+        _bool(args["forced"], "mechanic.forced")
+    for field in ("target_group_id", "group", "trigger_id", "control_id", "unique_id"):
+        if field in args:
+            _raw_int(args[field], f"mechanic.{field}")
+    for field in ("duration", "move_offset_x", "move_offset_y", "delay"):
+        if field in args:
+            finite(args[field], f"mechanic.{field}")
+    for field in ("activate", "ordered"):
+        if field in args:
+            _bool(args[field], f"mechanic.{field}")
+    if "remap_keys" in args:
+        if args["remap_keys"] is None and event == "EffectGameObject::triggerObject":
+            return
+        _groups(args["remap_keys"], "mechanic.remap_keys", remap=True)
+
+
+def _validate_paired_events(capture: dict, name: str) -> None:
+    attempt, watches = capture["attempt"], capture["object_watches"]
+    terminal = attempt["terminal"]
+    rows = attempt[name]
+    maximum = MAX_MECHANIC_EVENTS if name == "mechanic_events" else MAX_DELIVERY_EVENTS
+    if not isinstance(rows, list) or len(rows) > maximum:
+        raise ValueError(f"{name} must contain at most {maximum} paired records")
+    common = {
+        "sequence",
+        "parent_sequence",
+        "event",
+        "command_index",
+        "in_command",
+        "update_sequence",
+        "scheduler_sequence",
+        "arguments",
+        "phase_before",
+        "phase_after",
+        "wall_enter_ns",
+        "wall_exit_ns",
+    }
+    extra = (
+        {
+            "player",
+            "object",
+            "state_before",
+            "state_after",
+            "watched_before",
+            "watched_after",
+            "native_return",
+        }
+        if name == "mechanic_events"
+        else {"queue_before", "queue_after", "layer_timestamp_before", "layer_timestamp_after"}
+    )
+    previous_command, previous_enter = -1, -1
+    stack: list[int] = []
+    terminal_limit = (terminal["wall_elapsed_seconds"] + 1e-6) * 1e9
+    for index, row in enumerate(rows):
+        _fields(row, f"{name}[{index}]", common | extra)
+        if _int(row["sequence"], f"{name}.sequence") != index:
+            raise ValueError(f"{name} sequence must start at zero and be contiguous")
+        command = _int(row["command_index"], f"{name}.command_index", maximum=terminal["command_index"])
+        _bool(row["in_command"], f"{name}.in_command")
+        if row["in_command"] and command == 0:
+            raise ValueError(f"{name} cannot be in command processing at initial counter zero")
+        enter = _int(row["wall_enter_ns"], f"{name}.wall_enter_ns")
+        exit_time = _int(row["wall_exit_ns"], f"{name}.wall_exit_ns", minimum=enter)
+        if enter > terminal_limit or enter < previous_enter or command < previous_command:
+            raise ValueError(f"{name} entry must be ordered and no later than terminal")
+        previous_command, previous_enter = command, enter
+        for side in ("before", "after"):
+            _phase(row[f"phase_{side}"], f"{name}.phase_{side}")
+        parent = row["parent_sequence"]
+        if parent is not None:
+            _int(parent, f"{name}.parent_sequence", maximum=index - 1)
+        while stack and stack[-1] != parent:
+            sibling = rows[stack.pop()]
+            if sibling["wall_exit_ns"] > enter:
+                raise ValueError(f"{name} sibling intervals overlap or nesting is inconsistent")
+        if parent is not None:
+            if not stack:
+                raise ValueError(f"{name} parent is not an enclosing entry-order event")
+            enclosing = rows[parent]
+            if enter < enclosing["wall_enter_ns"] or exit_time > enclosing["wall_exit_ns"]:
+                raise ValueError(f"{name} child interval is outside its parent")
+            if command != enclosing["command_index"]:
+                raise ValueError(f"{name} nested event cannot invent a different command counter")
+        stack.append(index)
+        for key, records in (
+            ("update_sequence", attempt["updates"]),
+            ("scheduler_sequence", attempt["scheduler_updates"]),
+        ):
+            context = _context_id(row[key], f"{name}.{key}", records)
+            if context is not None:
+                enclosing = records[context]
+                if not (
+                    enclosing["command_index_before"] <= command <= enclosing["command_index_after"]
+                    and enclosing["wall_enter_ns"] <= enter <= exit_time <= enclosing["wall_exit_ns"]
+                ):
+                    raise ValueError(f"{name} event is outside its recorded native context")
+        if name == "mechanic_events":
+            _mechanic_arguments(row)
+            entity = row["object"]
+            if entity is not None:
+                _fields(entity, "mechanic.object", {"object_id", "runtime_unique_id", "group_ids"})
+                for field in ("object_id", "runtime_unique_id"):
+                    _raw_int(entity[field], f"mechanic.object.{field}")
+                _groups(entity["group_ids"], "mechanic.object.group_ids")
+            for side in ("before", "after"):
+                _state(row[f"state_{side}"], f"mechanic.state_{side}", extended=True, contacts=True)
+                _watched_objects(row[f"watched_{side}"], watches, f"mechanic.watched_{side}")
+                if row["player"] is not None and row[f"state_{side}"][f"player{row['player']}"] is None:
+                    raise ValueError("Mechanic actor is absent from its recorded state")
+        else:
+            event, args = row["event"], row["arguments"]
+            if not isinstance(event, str):
+                raise ValueError("Unsupported native delivery event")
+            if event in {"UILayer::keyDown", "UILayer::keyUp"}:
+                _fields(args, "delivery.arguments", {"key_code", "timestamp"})
+                _raw_int(args["key_code"], "delivery.key_code")
+                finite(args["timestamp"], "delivery.timestamp")
+            elif event == "GJBaseGameLayer::processQueuedButtons":
+                _fields(args, "delivery.arguments", {"dt_seconds", "clear_input_queue"})
+                finite(args["dt_seconds"], "delivery.dt_seconds", minimum=0, maximum=60)
+                _bool(args["clear_input_queue"], "delivery.clear_input_queue")
+                if not row["queue_before"]:
+                    raise ValueError("Recorded processQueuedButtons must have a nonempty entry queue")
+            else:
+                raise ValueError("Unsupported native delivery event")
+            for side in ("before", "after"):
+                _queue(row[f"queue_{side}"], f"delivery.queue_{side}")
+                finite(row[f"layer_timestamp_{side}"], f"delivery.layer_timestamp_{side}")
+
+
+def _validate_v4(capture: dict) -> None:
+    attempt = capture["attempt"]
+    watches = capture["object_watches"]
+    if not isinstance(watches, list) or len(watches) > MAX_OBJECT_WATCHES:
+        raise ValueError(f"object_watches must contain at most {MAX_OBJECT_WATCHES} declarations")
+    groups = []
+    for declaration in watches:
+        _fields(declaration, "object_watch", {"group_id", "object_id", "runtime_unique_id"})
+        groups.append(_int(declaration["group_id"], "object_watch.group_id", 1, 9999))
+        for field in ("object_id", "runtime_unique_id"):
+            _raw_int(declaration[field], f"object_watch.{field}")
+    if len(set(groups)) != len(groups):
+        raise ValueError("object_watches must contain unique positive groups")
+    delivery = _fields(
+        attempt["input_delivery"],
+        "input_delivery",
+        {"driver", "provenance", "entry_point", "injection_phase", "timestamp_policy"},
+    )
+    expected = {
+        "none": ("unknown", None, "none", "not-applicable"),
+        "owned-pre-command": (
+            "synthetic-scheduled",
+            "GJBaseGameLayer::handleButton",
+            "processCommands-entry-before-original",
+            "not-applicable",
+        ),
+        "scheduled-ui-callback": (
+            "synthetic-scheduled",
+            "UILayer::keyDown/keyUp",
+            "processCommands-entry-before-original",
+            "layer-m_timestamp",
+        ),
+    }
+    driver = delivery["driver"]
+    if not isinstance(driver, str) or driver not in expected:
+        raise ValueError("Unsupported input_delivery driver")
+    if (
+        tuple(delivery[key] for key in ("provenance", "entry_point", "injection_phase", "timestamp_policy"))
+        != expected[driver]
+    ):
+        raise ValueError("input_delivery metadata differs from its declared driver")
+    if (driver == "none") != (attempt["input_source"] == "unknown"):
+        raise ValueError("input_delivery driver differs from scheduled attempt provenance")
+    if driver == "scheduled-ui-callback" and any(
+        event["player"] != 1 or event["button"] != 1 for event in attempt["planned_inputs"]
+    ):
+        raise ValueError("Scheduled UI delivery supports only player1/button1")
+    if driver != "owned-pre-command" and attempt["blocked_inputs"]:
+        raise ValueError("Only owned-pre-command delivery suppresses native input")
+    for row in [*attempt["trace"], attempt["terminal"]]:
+        _watched_objects(row["watched_objects"], watches, "watched_objects")
+    for event in attempt["inputs"]:
+        _bool(event["in_command"], "input.in_command")
+        if event["in_command"] and event["command_index"] == 0:
+            raise ValueError("Input cannot be in command processing at counter zero")
+        for key, rows in (
+            ("update_sequence", attempt["updates"]),
+            ("scheduler_sequence", attempt["scheduler_updates"]),
+        ):
+            context = _context_id(event[key], f"input.{key}", rows)
+            if context is not None:
+                enclosing = rows[context]
+                if not (
+                    enclosing["command_index_before"]
+                    <= event["command_index"]
+                    <= enclosing["command_index_after"]
+                    and enclosing["wall_enter_ns"] <= event["wall_time_ns"] <= enclosing["wall_exit_ns"]
+                ):
+                    raise ValueError("Input receipt is outside its recorded native context")
+    for name in ("mechanic_events", "delivery_events"):
+        _validate_paired_events(capture, name)
+
+
 def _load(path: str | Path) -> tuple[dict, str]:
     capture, source_sha256 = read_json(path)
     version = capture.get("schema_version") if isinstance(capture, dict) else None
-    if type(version) is not int or version not in {1, 2, 3}:
-        raise ValueError("native capture schema_version must be integer 1, 2 or 3")
+    if type(version) is not int or version not in {1, 2, 3, 4}:
+        raise ValueError("native capture schema_version must be integer 1, 2, 3 or 4")
     rich = version >= 2
-    extended = version == 3
+    extended = version >= 3
+    contacts = version == 4
     _fields(
         capture,
         "capture",
@@ -303,7 +628,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
             "integrity",
             "state_fields",
         }
-        | ({"layer_state_fields"} if extended else set()),
+        | ({"layer_state_fields"} if extended else set())
+        | ({"object_watches"} if contacts else set()),
     )
     if capture["kind"] != "native_capture":
         raise ValueError("Expected kind native_capture")
@@ -338,7 +664,7 @@ def _load(path: str | Path) -> tuple[dict, str]:
         _text(value, f"collector.{key}")
     sha256(collector["source_tree_sha256"], "collector.source_tree_sha256")
     fields = capture["state_fields"]
-    player_fields = PLAYER_FIELDS_V3 if extended else PLAYER_FIELDS
+    player_fields = PLAYER_FIELDS_V4 if contacts else PLAYER_FIELDS_V3 if extended else PLAYER_FIELDS
     if (
         not isinstance(fields, list)
         or len(fields) != len(player_fields)
@@ -369,9 +695,10 @@ def _load(path: str | Path) -> tuple[dict, str]:
         _text(environment[key], f"environment.{key}")
     if environment["platform"] != "windows-x64":
         raise ValueError("Only the windows-x64 native capture contract is supported")
-    if environment["input_policy"] not in {INPUT_POLICY, LEGACY_INPUT_POLICY}:
+    supported_policies = {INPUT_POLICY_V4} if contacts else {INPUT_POLICY, LEGACY_INPUT_POLICY}
+    if environment["input_policy"] not in supported_policies:
         raise ValueError("Unsupported native capture input_policy")
-    if rich and environment["input_policy"] != INPUT_POLICY:
+    if rich and not contacts and environment["input_policy"] != INPUT_POLICY:
         raise ValueError("Schemas 2 and 3 require the owned native input policy")
     _bool(environment["configuration_complete"], "environment.configuration_complete")
     clocks = _fields(
@@ -502,10 +829,17 @@ def _load(path: str | Path) -> tuple[dict, str]:
             "trace",
             "terminal",
         }
-        | ({"blocked_inputs"} if environment["input_policy"] == INPUT_POLICY else set())
-        | ({"updates", "scheduler_updates", "phase_events"} if rich else set()),
+        | ({"blocked_inputs"} if environment["input_policy"] in {INPUT_POLICY, INPUT_POLICY_V4} else set())
+        | ({"updates", "scheduler_updates", "phase_events"} if rich else set())
+        | ({"input_delivery", "delivery_events", "mechanic_events"} if contacts else set()),
     )
     _text(attempt["id"], "attempt.id")
+    if contacts:
+        _fields(
+            attempt["input_delivery"],
+            "input_delivery",
+            {"driver", "provenance", "entry_point", "injection_phase", "timestamp_policy"},
+        )
     if _text(attempt["input_source"], "attempt.input_source") not in {"replay", "unknown"}:
         raise ValueError("attempt.input_source must be replay or unknown")
     if _text(attempt["start_kind"], "attempt.start_kind") not in {
@@ -550,14 +884,15 @@ def _load(path: str | Path) -> tuple[dict, str]:
                 "is_last_tick",
                 "state",
             }
-            | ({"phase", "update_sequence", "scheduler_sequence"} if rich else set()),
+            | ({"phase", "update_sequence", "scheduler_sequence"} if rich else set())
+            | ({"watched_objects"} if contacts else set()),
         )
         if _int(row["command_index"], f"trace[{index}].command_index") != index:
             raise ValueError("Native trace call indices must start at zero and be contiguous")
         finite(row["dt_seconds"], f"trace[{index}].dt_seconds", minimum=0, maximum=60)
         _bool(row["is_half_tick"], f"trace[{index}].is_half_tick")
         _bool(row["is_last_tick"], f"trace[{index}].is_last_tick")
-        _state(row["state"], f"trace[{index}].state", extended=extended)
+        _state(row["state"], f"trace[{index}].state", extended=extended, contacts=contacts)
         if index == 0 and (row["dt_seconds"] != 0 or row["is_half_tick"] or row["is_last_tick"]):
             raise ValueError(
                 "Initial trace must precede command processing with zero dt and false tick flags"
@@ -588,7 +923,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
                 "phase",
                 "native_return",
                 "wall_time_ns",
-            },
+            }
+            | ({"in_command", "update_sequence", "scheduler_sequence"} if contacts else set()),
         )
         if _int(event["sequence"], "input.sequence") != index:
             raise ValueError("Input sequence must start at zero and be contiguous")
@@ -612,8 +948,11 @@ def _load(path: str | Path) -> tuple[dict, str]:
                 raise ValueError("Requested events cannot claim a native return")
         else:
             _bool(event["native_return"], "input.native_return")
-        if attempt["input_source"] == "replay" and event["source"] != "replay":
+        owned_receipts = not contacts or attempt["input_delivery"].get("driver") == "owned-pre-command"
+        if attempt["input_source"] == "replay" and owned_receipts and event["source"] != "replay":
             raise ValueError("Controlled replay recording contains an unexpected observed input")
+        if contacts and not owned_receipts and event["source"] != "observed":
+            raise ValueError("UI/observation native receipts must preserve observed origin")
         if attempt["input_source"] == "unknown" and event["source"] != "observed":
             raise ValueError("An observed-input capture cannot claim a delivered replay input")
         wall_time = _int(event["wall_time_ns"], "input.wall_time_ns")
@@ -655,7 +994,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
             "wall_elapsed_seconds",
             "state",
         }
-        | ({"phase", "update_sequence", "scheduler_sequence"} if rich else set()),
+        | ({"phase", "update_sequence", "scheduler_sequence"} if rich else set())
+        | ({"watched_objects"} if contacts else set()),
     )
     if _text(terminal["outcome"], "terminal.outcome") not in {"completed", "died"}:
         raise ValueError("Native terminal evidence requires completed or died, not aborted/error")
@@ -678,7 +1018,7 @@ def _load(path: str | Path) -> tuple[dict, str]:
         raise ValueError("Blocked input wall timestamp is after the reported terminal callback")
     if rich:
         _validate_rich_observations(attempt, clocks, terminal_wall)
-    terminal_state = _state(terminal["state"], "terminal.state", extended=extended)
+    terminal_state = _state(terminal["state"], "terminal.state", extended=extended, contacts=contacts)
     # Terminal-hook and post-process snapshots need not be equal: they are
     # intentionally captured at different points in the native call stack.
     terminal_dead = any(
@@ -687,7 +1027,9 @@ def _load(path: str | Path) -> tuple[dict, str]:
     )
     if terminal["outcome"] == "died" and not terminal_dead:
         raise ValueError("A native death requires a recorded dead player after destroyPlayer")
-    if attempt["input_source"] == "replay":
+    if attempt["input_source"] == "replay" and (
+        not contacts or attempt["input_delivery"].get("driver") == "owned-pre-command"
+    ):
         expected_requests = [
             event for event in planned if event["command_index"] <= terminal["command_index"]
         ]
@@ -700,6 +1042,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
             raise ValueError(
                 "Recorded replay requests do not match the planned prefix through the terminal call"
             )
+    if contacts:
+        _validate_v4(capture)
     limitations = capture["limitations"]
     if not isinstance(limitations, list) or len(limitations) > 100:
         raise ValueError("limitations must be an array of at most 100 strings")
@@ -820,7 +1164,7 @@ def _terminal_component_diagnostics(
                     "compared": compared["state"]["dual_active"],
                 },
             }
-            if player_fields == PLAYER_FIELDS_V3
+            if "dual_active" in baseline["state"] and "dual_active" in compared["state"]
             else {}
         ),
     }
@@ -833,6 +1177,60 @@ def _call_arguments(row: dict) -> dict:
 def _stream_signature(rows: list[dict], *, update: bool) -> list[dict]:
     excluded = {"wall_enter_ns", "wall_exit_ns"} | ({"original_dt_seconds"} if update else set())
     return [{key: value for key, value in row.items() if key not in excluded} for row in rows]
+
+
+def native_event_signature(value: Any) -> Any:
+    """Project schema-4 native observations, retaining delivered native timing.
+
+    Runtime object UIDs and monotonic wall times are diagnostics. Layer and queue
+    timestamps, call placement, arguments and paired raw snapshots remain exact.
+    """
+    if isinstance(value, dict):
+        return {
+            key: native_event_signature(item)
+            for key, item in value.items()
+            if key not in {"runtime_unique_id", "wall_enter_ns", "wall_exit_ns"}
+        }
+    if isinstance(value, list):
+        return [native_event_signature(item) for item in value]
+    return value
+
+
+def delivery_context_signature(rows: list[dict]) -> list[dict]:
+    """Project validated schema-4 delivery events under a declared bounded scope.
+
+    Absolute native timestamps vary between runs. This projection excludes their
+    raw values without converting them into relative or simulated timestamps.
+    Every event, native queue command, queue step and delivered dt is retained.
+    It does not change the strict native mechanic-event projection.
+    """
+    result = native_event_signature(rows)
+    for row in result:
+        for key in ("layer_timestamp_before", "layer_timestamp_after"):
+            row.pop(key)
+        if row["event"] in {"UILayer::keyDown", "UILayer::keyUp"}:
+            row["arguments"].pop("timestamp")
+        for key in ("queue_before", "queue_after"):
+            for queued in row[key]:
+                queued.pop("timestamp")
+    return result
+
+
+def delivery_timestamp_signature(rows: list[dict]) -> list[dict]:
+    """Retain raw native time values separately as cross-run diagnostics."""
+    return [
+        {
+            "sequence": row["sequence"],
+            "event": row["event"],
+            "command_index": row["command_index"],
+            "layer_timestamp_before": row["layer_timestamp_before"],
+            "layer_timestamp_after": row["layer_timestamp_after"],
+            "callback_timestamp": row["arguments"].get("timestamp"),
+            "queue_before_timestamps": [queued["timestamp"] for queued in row["queue_before"]],
+            "queue_after_timestamps": [queued["timestamp"] for queued in row["queue_after"]],
+        }
+        for row in rows
+    ]
 
 
 def _stream_difference(baseline: list[dict], compared: list[dict]) -> dict:
@@ -924,7 +1322,7 @@ def _pre_end_comparison(baseline: dict, compared: dict) -> dict:
             [{"dual_active": row["state"]["dual_active"]} for row in left_trace],
             [{"dual_active": row["state"]["dual_active"]} for row in right_trace],
         )
-        if baseline["schema_version"] == 3
+        if baseline["schema_version"] >= 3
         else None
     )
     return {
@@ -1005,13 +1403,19 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         "No human performance, timing windows, difficulty probability or AR is inferred.",
         "A native phase prefix is diagnostic only and cannot close M1 or replace full recorded-subset comparison.",
     ]
-    if capture["schema_version"] == 3:
+    if capture["schema_version"] >= 3:
         warnings[1] = (
             "Recorded state covers selected player and layer fields, not complete world/trigger/input/clock state."
         )
         warnings.append(
             "Schema 3 preserves raw gravity_inverted, vehicle_size, player_speed and dual_active; size categories, speed units and complete player lifecycle are not inferred."
         )
+    if capture["schema_version"] == 4:
+        warnings += [
+            "Schema 4 records raw is_on_ground/is_on_slope, declared watched object fields and selected paired native callbacks; these are not a complete collider or trigger simulation.",
+            "Scheduled UILayer callbacks are synthetic in-engine delivery, not OS or hardware input; observed native receipts do not authenticate queued origins.",
+            "Object runtime_unique_id, wall timestamps and raw absolute delivery timestamps are cross-run diagnostics; delivery context and strict mechanic snapshots remain exact.",
+        ]
     if capture["provenance"]["origin"] == "synthetic":
         warnings.insert(0, "SYNTHETIC capture fixture, not native Geometry Dash evidence.")
     if not capture["environment"]["configuration_complete"]:
@@ -1030,6 +1434,13 @@ def _summary(capture: dict, source_sha256: str) -> dict:
                 "Blocked inputs were not forwarded; their effect on a counterfactual unsuppressed trajectory is not measured.",
             ]
         )
+    elif capture["schema_version"] == 4:
+        driver = capture["attempt"]["input_delivery"]["driver"]
+        warnings.append(
+            "Owned scheduled delivery suppresses unknown-origin non-injector handleButton requests; suppressed requests are diagnostic only."
+            if driver == "owned-pre-command"
+            else "Scheduled UI delivery forwards and records observed native requests, including unsolicited requests; scheduled intent does not authenticate their origin."
+        )
     else:
         warnings.append(
             "The legacy input policy does not record owned-channel suppression or blocked-input diagnostics."
@@ -1042,7 +1453,7 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         warnings.append(
             "A selected player dead flag is present at completion; player activity is not captured, "
             "so this flag cannot override the reported completion callback."
-            if capture["schema_version"] != 3
+            if capture["schema_version"] < 3
             else "A selected player dead flag is present at completion; raw dual_active does not describe the complete player lifecycle, so this flag cannot override the reported completion callback."
         )
     return {
@@ -1062,7 +1473,7 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         "collector": capture["collector"],
         "provenance": capture["provenance"],
         "state_fields": capture["state_fields"],
-        **({"layer_state_fields": capture["layer_state_fields"]} if capture["schema_version"] == 3 else {}),
+        **({"layer_state_fields": capture["layer_state_fields"]} if capture["schema_version"] >= 3 else {}),
         "attempt": {
             key: value
             for key, value in capture["attempt"].items()
@@ -1076,6 +1487,8 @@ def _summary(capture: dict, source_sha256: str) -> dict:
                 "updates",
                 "scheduler_updates",
                 "phase_events",
+                "delivery_events",
+                "mechanic_events",
             }
         },
         "terminal": capture["attempt"]["terminal"],
@@ -1089,9 +1502,14 @@ def _summary(capture: dict, source_sha256: str) -> dict:
                 for row in capture["attempt"]["planned_inputs"]
             ),
         },
-        "replay_execution_status": "observed_prefix_through_terminal"
-        if capture["attempt"]["input_source"] == "replay"
-        else "not_a_controlled_replay",
+        "replay_execution_status": (
+            "scheduled_intent_with_observed_native_receipts"
+            if capture["schema_version"] == 4
+            and capture["attempt"]["input_delivery"]["driver"] == "scheduled-ui-callback"
+            else "observed_prefix_through_terminal"
+            if capture["attempt"]["input_source"] == "replay"
+            else "not_a_controlled_replay"
+        ),
         "recorded_input_sha256": canonical_sha256(_input_signature(capture)),
         "blocked_input_diagnostics": {
             "status": "recorded" if "blocked_inputs" in capture["attempt"] else "not_recorded_legacy_policy",
@@ -1115,6 +1533,20 @@ def _summary(capture: dict, source_sha256: str) -> dict:
             "scheduler_updates": capture["attempt"]["scheduler_updates"],
             "phase_events": capture["attempt"]["phase_events"],
         },
+        **(
+            {
+                "object_watches": capture["object_watches"],
+                "native_object_observations": {
+                    "scope": "declared_watches_and_selected_native_callbacks",
+                    "mechanic_events": capture["attempt"]["mechanic_events"],
+                    "delivery_events": capture["attempt"]["delivery_events"],
+                    "mechanic_event_count": len(capture["attempt"]["mechanic_events"]),
+                    "delivery_event_count": len(capture["attempt"]["delivery_events"]),
+                },
+            }
+            if capture["schema_version"] == 4
+            else {}
+        ),
         "reported_hook_dt_sum_seconds": sum(row["dt_seconds"] for row in capture["attempt"]["trace"]),
         "limitations": capture["limitations"],
         "warnings": warnings,
@@ -1148,6 +1580,13 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
         ):
             if capture[key] != base[key]:
                 raise ValueError(f"Incompatible capture {key}")
+        if base["schema_version"] == 4:
+            if native_event_signature(capture["object_watches"]) != native_event_signature(
+                base["object_watches"]
+            ):
+                raise ValueError("Incompatible capture object_watches")
+            if capture["attempt"]["input_delivery"] != base["attempt"]["input_delivery"]:
+                raise ValueError("Repeat comparison requires the same input_delivery identity")
         attempt = capture["attempt"]
         if attempt["start_kind"] != "level_start":
             raise ValueError("Repeat comparison requires true full-start attempts")
@@ -1202,10 +1641,47 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
                 [{"dual_active": row["state"]["dual_active"]} for row in base_trace],
                 [{"dual_active": row["state"]["dual_active"]} for row in capture_trace],
             )
-            if base["schema_version"] == 3
+            if base["schema_version"] >= 3
             else None
         )
         rich_components = _rich_comparison(base, capture)
+        object_components = {}
+        object_identity_diagnostics = {}
+        absolute_timestamp_diagnostics = {}
+        if base["schema_version"] == 4:
+            object_identity_diagnostics = {
+                "stable_watch_identity_equal": True,
+                "runtime_unique_ids_equal": capture["object_watches"] == base["object_watches"],
+                "baseline_watches": base["object_watches"],
+                "compared_watches": capture["object_watches"],
+                "comparison_influence": "runtime_unique_id_excluded",
+            }
+            object_components["mechanic_events"] = _stream_difference(
+                native_event_signature(base["attempt"]["mechanic_events"]),
+                native_event_signature(capture["attempt"]["mechanic_events"]),
+            )
+            object_components["delivery_events"] = _stream_difference(
+                delivery_context_signature(base["attempt"]["delivery_events"]),
+                delivery_context_signature(capture["attempt"]["delivery_events"]),
+            )
+            baseline_times = delivery_timestamp_signature(base["attempt"]["delivery_events"])
+            compared_times = delivery_timestamp_signature(capture["attempt"]["delivery_events"])
+            absolute_timestamp_diagnostics = {
+                **_stream_difference(baseline_times, compared_times),
+                "baseline_signature_sha256": canonical_sha256(baseline_times),
+                "compared_signature_sha256": canonical_sha256(compared_times),
+                "baseline_signature": baseline_times,
+                "compared_signature": compared_times,
+                "comparison_influence": "diagnostic_only_excluded_absolute_native_time",
+            }
+            object_components["watched_objects"] = _trace_component_diagnostics(
+                [{"watched_objects": row["watched_objects"]} for row in base_trace],
+                [{"watched_objects": row["watched_objects"]} for row in capture_trace],
+            )
+            object_components["terminal_watched_objects_equal"] = (
+                base["attempt"]["terminal"]["watched_objects"]
+                == capture["attempt"]["terminal"]["watched_objects"]
+            )
         terminal_equal = {
             key: value
             for key, value in capture["attempt"]["terminal"].items()
@@ -1254,13 +1730,28 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
                 ),
                 "terminal_diagnostics": terminal_components,
                 "rich_observation_diagnostics": rich_components,
+                **({"native_object_diagnostics": object_components} if object_components else {}),
+                **(
+                    {"object_identity_diagnostics": object_identity_diagnostics}
+                    if object_identity_diagnostics
+                    else {}
+                ),
+                **(
+                    {"delivery_absolute_timestamp_diagnostics": absolute_timestamp_diagnostics}
+                    if base["schema_version"] == 4
+                    else {}
+                ),
                 "pre_end_animation_diagnostics": _pre_end_comparison(base, capture),
                 "first_different_state_call_index": first_state_difference,
                 "consistent": planned_inputs_equal
                 and inputs_equal
                 and state_equal
                 and terminal_equal
-                and rich_components.get("consistent", True),
+                and rich_components.get("consistent", True)
+                and all(
+                    value["equal"] if isinstance(value, dict) else value
+                    for value in object_components.values()
+                ),
             }
         )
     consistent = all(row["consistent"] for row in comparisons)
@@ -1289,14 +1780,47 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
         component_consistency["terminal_phase_and_context_equal"] = all(
             row["rich_observation_diagnostics"]["terminal_phase_and_context_equal"] for row in comparisons
         )
-    if base["schema_version"] == 3:
+    if base["schema_version"] >= 3:
         for key in ("recorded_dual_active_equal", "terminal_dual_active_equal"):
             component_consistency[key] = all(row[key] for row in comparisons)
+    if base["schema_version"] == 4:
+        for key, component in (
+            ("native_mechanic_events_equal", "mechanic_events"),
+            ("native_delivery_context_equal", "delivery_events"),
+            ("recorded_watched_objects_equal", "watched_objects"),
+        ):
+            component_consistency[key] = all(
+                row["native_object_diagnostics"][component]["equal"] for row in comparisons
+            )
+        component_consistency["terminal_watched_objects_equal"] = all(
+            row["native_object_diagnostics"]["terminal_watched_objects_equal"] for row in comparisons
+        )
     return {
         "schema_version": 1,
         "kind": "native_capture_comparison",
         "status": "recorded_subset_consistent" if consistent else "recorded_subset_inconsistent",
         "comparison_rule": "exact_recorded_call_arguments_player_fields_inputs_and_terminal",
+        **(
+            {
+                "delivery_context_protocol": {
+                    "id": "native-delivery-context-v1",
+                    "scope": "exact_recorded_delivery_events_without_raw_absolute_native_time",
+                    "excluded_native_time_fields": [
+                        "layer_timestamp_before",
+                        "layer_timestamp_after",
+                        "UILayer.arguments.timestamp",
+                        "queue_before[].timestamp",
+                        "queue_after[].timestamp",
+                    ],
+                    "retained": "event_order_nesting_command_context_phase_key_queue_button_pressed_player_step_delivered_dt",
+                    "raw_absolute_time_comparison": "separate_diagnostic_without_gate_influence",
+                    "input_receipt_scope": "every_actual_native_receipt_through_terminal",
+                    "relative_timestamp_normalization": "none",
+                },
+            }
+            if base["schema_version"] == 4
+            else {}
+        ),
         "component_consistency": component_consistency,
         "authentication_status": "not_authenticated",
         "physics_status": "not_independently_verified",
@@ -1341,10 +1865,20 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
             "Wall timestamps are excluded; reported dt/call sequence and terminal placement are compared exactly.",
             "Call arguments, selected player fields and terminal callback/state are reported separately; all must match exactly, including rotation, for subset consistency.",
             "Schema 2 also compares delivered update/scheduler dt, recorded grouping, native phase flags/events and terminal context exactly."
-            if base["schema_version"] != 3
+            if base["schema_version"] < 3
             else "Schema 3 also compares raw player gravity/size/speed and layer dual_active through terminal, plus all schema-2 rich observations exactly.",
             "Original update/scheduler dt and wall cadence are separately reported diagnostics and do not substitute for delivered call arguments.",
             "Pre-end-animation checks use a recorded native phase transition and never override the full result or establish M1.",
+            *(
+                [
+                    "Schema 4 also compares selected raw contact flags, watched objects, strict mechanic callbacks and the declared native-delivery-context-v1 projection through terminal.",
+                    "Absolute delivery layer/callback/queue timestamps are separate raw diagnostics; all queue commands/steps, event contexts, delivered dt and actual native input receipts remain in the gate.",
+                    "Runtime object UIDs and event wall times are diagnostic only; stable watch selectors, native receipt contexts and event snapshots remain exact.",
+                    "Scheduled UI callbacks are in-engine synthetic delivery, not OS or hardware-input equivalence.",
+                ]
+                if base["schema_version"] == 4
+                else []
+            ),
             *(
                 [
                     "Blocked unknown-origin requests were not forwarded and are diagnostic only; differences do not affect delivered subset consistency.",
@@ -1352,6 +1886,14 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
                     "Direct PlayerObject push/release calls bypassing handleButton are outside replay channel control.",
                 ]
                 if base["environment"]["input_policy"] == INPUT_POLICY
+                or (
+                    base["schema_version"] == 4
+                    and base["attempt"]["input_delivery"]["driver"] == "owned-pre-command"
+                )
+                else [
+                    "UI delivery records forwarded observed requests; suppressed-input counterfactuals and hardware equivalence are unsupported."
+                ]
+                if base["schema_version"] == 4
                 else [
                     "The legacy input policy does not supply owned-channel suppression or blocked-input diagnostics."
                 ]

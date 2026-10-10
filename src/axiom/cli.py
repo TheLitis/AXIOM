@@ -36,6 +36,11 @@ def parser():
         "native-compare", help="Compare recorded subsets of repeated native replays"
     )
     compare.add_argument("inputs", type=Path, nargs="+", help="Two to sixteen capture files")
+    delivery = commands.add_parser(
+        "native-delivery-compare", help="Compare a declared owned plan with its synthetic UI queue route"
+    )
+    delivery.add_argument("owned", type=Path)
+    delivery.add_argument("ui", type=Path)
     fixtures = commands.add_parser(
         "fixtures", help="Validate generated fixture specifications; no native verification"
     )
@@ -57,6 +62,14 @@ def parser():
     fixture_response.add_argument("changed", type=Path)
     fixture_response.add_argument("--case", dest="case_id", required=True)
     fixture_response.add_argument("--check", dest="check_id", required=True)
+    variants = commands.add_parser(
+        "fixture-variants", help="Compare a frozen construction change with its same-plan native control"
+    )
+    variants.add_argument("study", type=Path)
+    variants.add_argument("matrix", type=Path)
+    variants.add_argument("positive", type=Path)
+    variants.add_argument("control", type=Path)
+    variants.add_argument("--case", dest="case_id", required=True)
     demo = commands.add_parser("demo", help="Create an offline report from explicitly synthetic examples")
     demo.add_argument("--examples", type=Path, default=Path("examples"))
     demo.add_argument("--out", type=Path, default=Path("reports/demo"))
@@ -70,9 +83,11 @@ def parser():
         oracle,
         native,
         compare,
+        delivery,
         fixtures,
         fixture_check,
         fixture_response,
+        variants,
     ):
         command.add_argument("--json", type=Path, help="Write machine-readable result (otherwise stdout)")
     for command in (timing, cohort):
@@ -123,6 +138,10 @@ def main(argv=None):
             from .native import compare_native_captures
 
             result = compare_native_captures(args.inputs)
+        elif args.command == "native-delivery-compare":
+            from .equivalence import compare_native_delivery
+
+            result = compare_native_delivery(args.owned, args.ui)
         elif args.command == "fixtures":
             from .fixtures import get_fixture_run, load_fixture_matrix
 
@@ -139,6 +158,12 @@ def main(argv=None):
 
             result = compare_fixture_response(
                 args.input, args.case_id, args.check_id, args.reference, args.changed
+            )
+        elif args.command == "fixture-variants":
+            from .interactions import compare_fixture_variants
+
+            result = compare_fixture_variants(
+                args.study, args.matrix, args.case_id, args.positive, args.control
             )
         else:
             from .survival import analyze_cohort

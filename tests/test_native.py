@@ -9,9 +9,11 @@ import pytest
 
 from axiom.cli import main
 from axiom.native import (
+    INPUT_POLICY_V4,
     LEGACY_INPUT_POLICY,
     canonical_sha256,
     compare_native_captures,
+    delivery_context_signature,
     inspect_native_capture,
     load_native_capture,
 )
@@ -213,6 +215,148 @@ def mechanics_capture(*, attempt_id="synthetic-attempt-1", policy="native"):
             if sample["state"][name] is not None:
                 sample["state"][name].update(gravity_inverted=False, vehicle_size=1.0, player_speed=0.9)
     return data
+
+
+def collision_capture(*, attempt_id="synthetic-attempt-1", policy="native", driver="owned-pre-command"):
+    """Schema-4 synthetic observations, never proof of real native execution."""
+    data = mechanics_capture(attempt_id=attempt_id, policy=policy)
+    data["schema_version"] = 4
+    data["state_fields"] += ["is_on_ground", "is_on_slope"]
+    data["environment"]["input_policy"] = INPUT_POLICY_V4
+    data["challenge"]["input_policy"] = INPUT_POLICY_V4
+    refresh_environment(data)
+    data["object_watches"] = [{"group_id": 1, "object_id": 1, "runtime_unique_id": 42}]
+    watch = {"group_id": 1, "x": 30.0, "y": 90.0, "is_group_disabled": False, "is_disabled": False}
+    for row in [*data["attempt"]["trace"], data["attempt"]["terminal"]]:
+        row["watched_objects"] = [deepcopy(watch)]
+        for actor in ("player1", "player2"):
+            if row["state"][actor] is not None:
+                row["state"][actor].update(is_on_ground=True, is_on_slope=False)
+    delivery = {
+        "none": ("unknown", None, "none", "not-applicable"),
+        "owned-pre-command": (
+            "synthetic-scheduled",
+            "GJBaseGameLayer::handleButton",
+            "processCommands-entry-before-original",
+            "not-applicable",
+        ),
+        "scheduled-ui-callback": (
+            "synthetic-scheduled",
+            "UILayer::keyDown/keyUp",
+            "processCommands-entry-before-original",
+            "layer-m_timestamp",
+        ),
+    }[driver]
+    data["attempt"]["input_delivery"] = dict(
+        zip(
+            ("driver", "provenance", "entry_point", "injection_phase", "timestamp_policy"),
+            (driver, *delivery),
+        )
+    )
+    for event in data["attempt"]["inputs"]:
+        event.update(in_command=True, update_sequence=0, scheduler_sequence=0)
+        event["source"] = "replay" if driver == "owned-pre-command" else "observed"
+    if driver == "none":
+        data["attempt"].update(input_source="unknown", replay_sha256=None, planned_inputs=[])
+    data["attempt"].update(delivery_events=[], mechanic_events=[])
+    return data
+
+
+schema4_capture = collision_capture
+
+
+def mechanic_event(document, *, event="PlayerObject::collidedWithObject"):
+    phase = {"level_end_animation_started": False, "has_completed_level": False}
+    before = deepcopy(document["attempt"]["trace"][1]["state"])
+    after = deepcopy(before)
+    before["player1"]["is_on_ground"] = False
+    record = {
+        "sequence": 0,
+        "parent_sequence": None,
+        "event": event,
+        "command_index": 1,
+        "in_command": True,
+        "update_sequence": 0,
+        "scheduler_sequence": 0,
+        "player": 1,
+        "object": {"object_id": 1, "runtime_unique_id": 42, "group_ids": [1]},
+        "arguments": {
+            "dt_seconds": 1 / 240,
+            "rect": {"x": 0, "y": 0, "width": 30, "height": 30},
+            "skip_check": False,
+        },
+        "state_before": before,
+        "state_after": after,
+        "watched_before": deepcopy(document["attempt"]["trace"][1]["watched_objects"]),
+        "watched_after": deepcopy(document["attempt"]["trace"][1]["watched_objects"]),
+        "phase_before": deepcopy(phase),
+        "phase_after": deepcopy(phase),
+        "native_return": True,
+        "wall_enter_ns": 1_000_003,
+        "wall_exit_ns": 1_000_005,
+    }
+    payloads = {
+        "PlayerObject::updateCollide": {"direction": 1},
+        "PlayerObject::collidedWithSlopeInternal": {"dt_seconds": 1 / 240, "forced": False},
+        "PlayLayer::destroyPlayer": {},
+        "GJBaseGameLayer::triggerMoveCommand": {
+            "target_group_id": 1,
+            "duration": 0.5,
+            "move_offset_x": 0,
+            "move_offset_y": 30,
+        },
+        "GJBaseGameLayer::toggleGroupTriggered": {
+            "group": 1,
+            "activate": False,
+            "remap_keys": [],
+            "trigger_id": 0,
+            "control_id": 0,
+        },
+        "GJBaseGameLayer::toggleGroup": {"group": 1, "activate": False},
+        "GJBaseGameLayer::spawnGroup": {
+            "group": 1,
+            "ordered": False,
+            "delay": 0.5,
+            "remap_keys": [],
+            "trigger_id": 0,
+            "control_id": 0,
+        },
+        "EffectGameObject::triggerObject": {"unique_id": 0, "remap_keys": None},
+    }
+    if event in payloads:
+        record.update(arguments=payloads[event], native_return=None)
+    if not event.startswith("PlayerObject::") and event != "PlayLayer::destroyPlayer":
+        record["player"] = None
+    if event in {
+        "GJBaseGameLayer::toggleGroup",
+        "GJBaseGameLayer::toggleGroupTriggered",
+        "GJBaseGameLayer::spawnGroup",
+    }:
+        record["object"] = None
+    return record
+
+
+def delivery_event(*, event="UILayer::keyDown"):
+    phase = {"level_end_animation_started": False, "has_completed_level": False}
+    queue = [{"button": 1, "pressed": True, "player": 1, "step": 1, "timestamp": 0.004}]
+    return {
+        "sequence": 0,
+        "parent_sequence": None,
+        "event": event,
+        "command_index": 1,
+        "in_command": True,
+        "update_sequence": 0,
+        "scheduler_sequence": 0,
+        "arguments": {"key_code": 32, "timestamp": 0.004},
+        "queue_before": [],
+        "queue_after": queue,
+        "layer_timestamp_before": 0.004,
+        "layer_timestamp_after": 0.004,
+        "phase_before": deepcopy(phase),
+        "phase_after": deepcopy(phase),
+        "wall_enter_ns": 1_000_003,
+        "wall_exit_ns": 1_000_005,
+    }
 
 
 def mechanics_sample(document, sample):
@@ -1311,3 +1455,299 @@ def test_schema2_comparison_components_and_inspection_do_not_fabricate_layer_fie
 def test_schema2_and_schema3_cannot_be_compared_as_compatible_recorded_state(tmp_path):
     with pytest.raises(ValueError, match="schema_version"):
         compare(tmp_path, rich_capture(), mechanics_capture(attempt_id="other"))
+
+
+def test_schema4_retains_raw_contacts_watches_and_paired_callbacks(tmp_path):
+    data = collision_capture()
+    data["attempt"]["mechanic_events"] = [mechanic_event(data)]
+    report = inspect(tmp_path, data)
+    assert report["capture_schema_version"] == 4
+    assert report["object_watches"] == data["object_watches"]
+    assert report["terminal"]["state"]["player1"]["is_on_ground"] is True
+    assert report["native_object_observations"]["mechanic_event_count"] == 1
+    assert "mechanic_events" not in report["attempt"]
+    assert any("synthetic in-engine delivery" in warning for warning in report["warnings"])
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        "PlayerObject::collidedWithObject",
+        "PlayerObject::updateCollide",
+        "PlayerObject::collidedWithSlopeInternal",
+        "PlayLayer::destroyPlayer",
+        "GJBaseGameLayer::triggerMoveCommand",
+        "GJBaseGameLayer::toggleGroupTriggered",
+        "GJBaseGameLayer::toggleGroup",
+        "GJBaseGameLayer::spawnGroup",
+        "EffectGameObject::triggerObject",
+    ],
+)
+def test_schema4_each_supported_native_mechanic_payload_is_valid(tmp_path, event):
+    data = collision_capture()
+    data["attempt"]["mechanic_events"] = [mechanic_event(data, event=event)]
+    assert load_native_capture(save(tmp_path, data))["attempt"]["mechanic_events"][0]["event"] == event
+
+
+@pytest.mark.parametrize("driver", ["none", "owned-pre-command", "scheduled-ui-callback"])
+def test_schema4_driver_provenance_is_distinct_from_native_receipt_source(tmp_path, driver):
+    data = collision_capture(driver=driver)
+    if driver != "owned-pre-command":
+        # Extra native requests remain observed data; scheduled UI intent does
+        # not falsely attribute every native receipt to its planned source.
+        extra = deepcopy(data["attempt"]["inputs"][0])
+        extra.update(sequence=2, command_index=2, pressed=False, wall_time_ns=1_000_004)
+        data["attempt"]["inputs"].append(extra)
+    assert load_native_capture(save(tmp_path, data))["attempt"]["input_delivery"]["driver"] == driver
+
+
+def test_schema4_delivery_records_keep_queue_and_layer_timing(tmp_path):
+    data = collision_capture(driver="scheduled-ui-callback")
+    queued = delivery_event(event="GJBaseGameLayer::processQueuedButtons")
+    queued.update(
+        sequence=1,
+        arguments={"dt_seconds": 1 / 240, "clear_input_queue": False},
+        queue_before=deepcopy(queued["queue_after"]),
+        queue_after=[],
+        wall_enter_ns=1_000_006,
+        wall_exit_ns=1_000_007,
+    )
+    data["attempt"]["delivery_events"] = [delivery_event(), queued]
+    assert inspect(tmp_path, data)["native_object_observations"]["delivery_event_count"] == 2
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d["state_fields"].remove("is_on_ground"),
+        lambda d: d["attempt"]["trace"][1]["state"]["player1"].update(is_on_slope=1),
+        lambda d: d["attempt"]["terminal"]["state"]["player1"].pop("is_on_ground"),
+        lambda d: d["object_watches"][0].update(group_id=0),
+        lambda d: d["object_watches"].append(deepcopy(d["object_watches"][0])),
+        lambda d: d["attempt"]["trace"][1]["watched_objects"][0].update(group_id=2),
+        lambda d: d["attempt"]["trace"][1]["watched_objects"][0].update(is_disabled=0),
+        lambda d: d["attempt"]["terminal"]["watched_objects"][0].update(x=float("inf")),
+        lambda d: d["attempt"].update(input_delivery=[]),
+        lambda d: d["attempt"]["input_delivery"].update(provenance="hardware"),
+        lambda d: d["attempt"]["inputs"][0].update(in_command=1),
+        lambda d: d["attempt"]["inputs"][0].update(update_sequence=1),
+        lambda d: d["attempt"]["mechanic_events"][0].update(native_return=None),
+        lambda d: d["attempt"]["mechanic_events"][0].update(sequence=1),
+        lambda d: d["attempt"]["mechanic_events"][0].update(parent_sequence=0),
+        lambda d: d["attempt"]["mechanic_events"][0].update(
+            wall_enter_ns=30_000_000, wall_exit_ns=31_000_000
+        ),
+        lambda d: d["attempt"]["mechanic_events"][0].update(wall_exit_ns=30_000_000),
+        lambda d: d["attempt"]["mechanic_events"][0]["arguments"].update(skip_check=0),
+        lambda d: d["attempt"]["mechanic_events"][0]["object"].update(group_ids=[2, 1]),
+        lambda d: d["attempt"]["mechanic_events"][0]["state_after"]["player1"].pop("is_on_slope"),
+        lambda d: d["attempt"]["delivery_events"][0]["queue_after"][0].update(timestamp=True),
+        lambda d: d["attempt"]["delivery_events"][0].update(layer_timestamp_after=float("nan")),
+        lambda d: d["attempt"]["delivery_events"][0].update(event="invented-hook"),
+    ],
+)
+def test_schema4_malformed_observations_rejected(tmp_path, change):
+    data = collision_capture()
+    data["attempt"]["mechanic_events"] = [mechanic_event(data)]
+    data["attempt"]["delivery_events"] = [delivery_event()]
+    change(data)
+    with pytest.raises(ValueError):
+        load_native_capture(save(tmp_path, data))
+
+
+def test_schema4_runtime_uids_and_wall_timing_are_diagnostic_only(tmp_path):
+    first = collision_capture()
+    first["attempt"]["mechanic_events"] = [mechanic_event(first)]
+    second = deepcopy(first)
+    second["attempt"]["id"] = "other"
+    second["object_watches"][0]["runtime_unique_id"] = 99
+    second["attempt"]["mechanic_events"][0]["object"]["runtime_unique_id"] = 99
+    second["attempt"]["mechanic_events"][0]["wall_enter_ns"] += 10
+    second["attempt"]["mechanic_events"][0]["wall_exit_ns"] += 10
+    report = compare(tmp_path, first, second)
+    assert report["status"] == "recorded_subset_consistent"
+    assert len(report["component_consistency"]) == 18
+
+
+@pytest.mark.parametrize(
+    "change,component",
+    [
+        (
+            lambda d: d["attempt"]["trace"][1]["state"]["player1"].update(is_on_ground=False),
+            "recorded_player_fields_equal",
+        ),
+        (
+            lambda d: d["attempt"]["trace"][1]["watched_objects"][0].update(y=100),
+            "recorded_watched_objects_equal",
+        ),
+        (
+            lambda d: d["attempt"]["terminal"]["watched_objects"][0].update(is_disabled=True),
+            "terminal_watched_objects_equal",
+        ),
+        (
+            lambda d: d["attempt"]["mechanic_events"][0].update(native_return=False),
+            "native_mechanic_events_equal",
+        ),
+        (
+            lambda d: d["attempt"]["delivery_events"][0]["queue_after"][0].update(step=2),
+            "native_delivery_context_equal",
+        ),
+        (
+            lambda d: d["attempt"]["delivery_events"][0]["arguments"].update(key_code=33),
+            "native_delivery_context_equal",
+        ),
+    ],
+)
+def test_schema4_each_new_component_influences_full_repeat_result(tmp_path, change, component):
+    first = collision_capture()
+    first["attempt"]["mechanic_events"] = [mechanic_event(first)]
+    first["attempt"]["delivery_events"] = [delivery_event()]
+    second = deepcopy(first)
+    second["attempt"]["id"] = "other"
+    change(second)
+    report = compare(tmp_path, first, second)
+    assert report["status"] == "recorded_subset_inconsistent"
+    assert report["component_consistency"][component] is False
+
+
+def test_schema4_repeat_rejects_different_delivery_and_watch_identities(tmp_path):
+    first = collision_capture()
+    with pytest.raises(ValueError, match="input_delivery"):
+        compare(tmp_path, first, collision_capture(attempt_id="other", driver="scheduled-ui-callback"))
+    second = collision_capture(attempt_id="other")
+    second["object_watches"][0]["object_id"] = 2
+    with pytest.raises(ValueError, match="object_watches"):
+        compare(tmp_path, first, second)
+
+
+def test_schema4_outside_command_native_ui_receipts_preserve_actual_context(tmp_path):
+    data = collision_capture(driver="scheduled-ui-callback")
+    for receipt in data["attempt"]["inputs"]:
+        receipt.update(in_command=False, update_sequence=None, scheduler_sequence=None)
+    assert load_native_capture(save(tmp_path, data))["attempt"]["inputs"][1]["in_command"] is False
+    changed = deepcopy(data)
+    changed["attempt"]["id"] = "other"
+    changed["attempt"]["inputs"][1].update(in_command=True, update_sequence=0, scheduler_sequence=0)
+    assert compare(tmp_path, data, changed)["component_consistency"]["recorded_inputs_equal"] is False
+
+
+def test_schema4_nested_event_closure_can_follow_terminal_inside_native_parent_context(tmp_path):
+    data = collision_capture()
+    parent = mechanic_event(data, event="GJBaseGameLayer::triggerMoveCommand")
+    parent.update(wall_enter_ns=1_000_000, wall_exit_ns=20_500_000)
+    child = mechanic_event(data, event="PlayLayer::destroyPlayer")
+    child.update(sequence=1, parent_sequence=0, wall_enter_ns=1_000_003, wall_exit_ns=20_001_000)
+    data["attempt"]["mechanic_events"] = [parent, child]
+    assert len(load_native_capture(save(tmp_path, data))["attempt"]["mechanic_events"]) == 2
+    child["parent_sequence"] = None
+    with pytest.raises(ValueError, match="sibling"):
+        load_native_capture(save(tmp_path, data))
+
+
+@pytest.mark.parametrize(
+    "collection,maximum", [("object_watches", 8), ("mechanic_events", 4096), ("delivery_events", 4096)]
+)
+def test_schema4_record_streams_have_explicit_resource_limits(tmp_path, collection, maximum):
+    data = collision_capture()
+    if collection == "object_watches":
+        data[collection] *= maximum + 1
+    else:
+        row = mechanic_event(data) if collection == "mechanic_events" else delivery_event()
+        data["attempt"][collection] = [row] * (maximum + 1)
+    with pytest.raises(ValueError, match="at most"):
+        load_native_capture(save(tmp_path, data))
+
+
+def test_schema4_queue_resource_limit_and_untrusted_event_type_are_rejected(tmp_path):
+    data = collision_capture()
+    event = delivery_event()
+    event["queue_after"] *= 257
+    data["attempt"]["delivery_events"] = [event]
+    with pytest.raises(ValueError, match="at most"):
+        load_native_capture(save(tmp_path, data))
+    event = delivery_event()
+    event["event"] = []
+    data["attempt"]["delivery_events"] = [event]
+    with pytest.raises(ValueError, match="Unsupported native delivery"):
+        load_native_capture(save(tmp_path, data))
+
+
+@pytest.mark.parametrize("builder", [capture, rich_capture, mechanics_capture])
+def test_schema4_data_is_never_silently_accepted_under_older_capture_versions(tmp_path, builder):
+    data = builder()
+    data["object_watches"] = []
+    with pytest.raises(ValueError, match="unknown object_watches"):
+        load_native_capture(save(tmp_path, data))
+
+
+def test_schema4_raw_hook_numbers_are_finite_without_invented_physical_ranges(tmp_path):
+    data = collision_capture()
+    event = mechanic_event(data)
+    event["arguments"]["rect"]["width"] = -1.0
+    event["object"]["runtime_unique_id"] = -(2**31)
+    data["attempt"]["mechanic_events"] = [event]
+    assert (
+        load_native_capture(save(tmp_path, data))["attempt"]["mechanic_events"][0]["arguments"]["rect"][
+            "width"
+        ]
+        == -1.0
+    )
+
+
+def test_schema4_absolute_delivery_timestamps_are_explicit_raw_diagnostics(tmp_path):
+    first = collision_capture(driver="scheduled-ui-callback")
+    first["attempt"]["delivery_events"] = [delivery_event()]
+    second = deepcopy(first)
+    second["attempt"]["id"] = "other"
+    event = second["attempt"]["delivery_events"][0]
+    event["layer_timestamp_before"] += 183_000.0
+    event["layer_timestamp_after"] += 183_000.0
+    event["arguments"]["timestamp"] += 183_000.0
+    event["queue_after"][0]["timestamp"] += 183_000.0
+    report = compare(tmp_path, first, second)
+    assert report["status"] == "recorded_subset_consistent"
+    assert report["component_consistency"]["native_delivery_context_equal"]
+    assert report["delivery_context_protocol"]["id"] == "native-delivery-context-v1"
+    diagnostic = report["comparisons"][0]["delivery_absolute_timestamp_diagnostics"]
+    assert diagnostic["equal"] is False
+    assert diagnostic["first_difference"]["sequence"] == 0
+    assert diagnostic["baseline_signature_sha256"] != diagnostic["compared_signature_sha256"]
+    assert diagnostic["compared_signature"][0]["callback_timestamp"] == event["arguments"]["timestamp"]
+    assert first["attempt"]["delivery_events"][0]["arguments"]["timestamp"] == 0.004
+
+
+def test_delivery_context_projection_keeps_every_queue_command_without_mutating_capture():
+    events = [delivery_event()]
+    saved = deepcopy(events)
+    actual = delivery_context_signature(events)
+    assert events == saved
+    assert actual[0]["queue_after"] == [{"button": 1, "pressed": True, "player": 1, "step": 1}]
+    assert actual[0]["arguments"] == {"key_code": 32}
+    assert "layer_timestamp_before" not in actual[0]
+
+
+def test_schema4_raw_timestamp_exclusion_never_removes_extra_actual_native_receipts(tmp_path):
+    first = collision_capture(driver="scheduled-ui-callback")
+    first["attempt"]["delivery_events"] = [delivery_event()]
+    second = deepcopy(first)
+    second["attempt"]["id"] = "other"
+    extra = deepcopy(second["attempt"]["inputs"][0])
+    extra.update(sequence=2, pressed=False, wall_time_ns=1_000_010)
+    second["attempt"]["inputs"].append(extra)
+    report = compare(tmp_path, first, second)
+    assert report["component_consistency"]["native_delivery_context_equal"]
+    assert report["component_consistency"]["recorded_inputs_equal"] is False
+    assert report["status"] == "recorded_subset_inconsistent"
+
+
+def test_schema4_toggle_group_requires_actual_exact_group_and_boolean_arguments(tmp_path):
+    data = collision_capture()
+    record = mechanic_event(data, event="GJBaseGameLayer::toggleGroup")
+    data["attempt"]["mechanic_events"] = [record]
+    assert load_native_capture(save(tmp_path, data))["attempt"]["mechanic_events"][0]["arguments"] == {
+        "group": 1,
+        "activate": False,
+    }
+    record["arguments"]["activate"] = 0
+    with pytest.raises(ValueError, match="JSON boolean"):
+        load_native_capture(save(tmp_path, data))

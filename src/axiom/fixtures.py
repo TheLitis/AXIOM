@@ -20,6 +20,20 @@ MAX_RUNS = 16
 MAX_LEVEL_BYTES = 64 * 1024
 _EVENT_FIELDS = frozenset({"command_index", "player", "button", "pressed"})
 _MECHANICS_FIELDS = ("gravity_inverted", "vehicle_size", "player_speed")
+_CONTACT_FIELDS = ("is_on_ground", "is_on_slope")
+MAX_WITNESSES = 32
+_EFFECT_EVENTS = frozenset(
+    {
+        "PlayerObject::collidedWithObject",
+        "PlayerObject::updateCollide",
+        "PlayerObject::collidedWithSlopeInternal",
+        "PlayLayer::destroyPlayer",
+        "GJBaseGameLayer::triggerMoveCommand",
+        "GJBaseGameLayer::toggleGroupTriggered",
+        "GJBaseGameLayer::toggleGroup",
+        "GJBaseGameLayer::spawnGroup",
+    }
+)
 
 
 def _fields(value: object, name: str, required: set[str] | frozenset[str]) -> dict:
@@ -145,11 +159,141 @@ def _response_mechanics(value: object, player: int) -> dict:
     return predicates
 
 
+def _window(value: object, name: str) -> dict:
+    window = _fields(value, name, {"first", "last"})
+    first = _int(window["first"], f"{name}.first", 0, MAX_TRACE_RECORDS - 1)
+    _int(window["last"], f"{name}.last", first, MAX_TRACE_RECORDS - 1)
+    return window
+
+
+def _state_witnesses(value: object) -> list:
+    rows = _array(value, "required_state_witnesses", 0, MAX_WITNESSES)
+    ids = set()
+    for row in rows:
+        _fields(row, "state witness", {"id", "player", "mode", "command_window", "min_samples", "predicates"})
+        identifier = _id(row["id"], "state witness.id")
+        if identifier in ids:
+            raise ValueError("Duplicate state witness id")
+        ids.add(identifier)
+        actor = _int(row["player"], "state witness.player", 1, 2)
+        if not isinstance(row["mode"], str) or row["mode"] not in MODES:
+            raise ValueError("State witness mode must name a supported mode")
+        window = _window(row["command_window"], "state witness.command_window")
+        _int(row["min_samples"], "state witness.min_samples", 1, window["last"] - window["first"] + 1)
+        predicates = _fields(
+            row["predicates"],
+            "state witness.predicates",
+            {*_CONTACT_FIELDS, *_MECHANICS_FIELDS, "dual_active", "y"},
+        )
+        for field, expected in predicates.items():
+            if expected is None:
+                continue
+            if field in {*_CONTACT_FIELDS, "gravity_inverted", "dual_active"}:
+                if type(expected) is not bool:
+                    raise ValueError(f"State witness {field} must be a JSON boolean or null")
+            elif field == "y":
+                limits = _fields(expected, "state witness.y", {"minimum", "maximum"})
+                low = finite(limits["minimum"], "state witness.y.minimum")
+                if finite(limits["maximum"], "state witness.y.maximum") < low:
+                    raise ValueError("State witness y maximum must be at least its minimum")
+            else:
+                finite(expected, f"state witness.{field}")
+        if all(predicates[field] is None for field in _CONTACT_FIELDS):
+            raise ValueError("A state witness requires a non-null contact flag predicate")
+        if actor == 2 and predicates["dual_active"] is False:
+            raise ValueError("Player2 state witness cannot require dual_active=false")
+    return rows
+
+
+def _effect_change(value: object, name: str, *, target: bool) -> dict | None:
+    if value is None:
+        return None
+    change = _fields(value, name, {"field", "before", "after"} | ({"group_id"} if target else set()))
+    boolean_fields = {"is_group_disabled", "is_disabled"} if target else {*_CONTACT_FIELDS, "is_dead"}
+    fields = boolean_fields | ({"x", "y"} if target else {"y", "y_velocity"})
+    field = change["field"]
+    if not isinstance(field, str) or field not in fields:
+        raise ValueError(f"{name}.field must name a supported raw observation")
+    if target:
+        _int(change["group_id"], f"{name}.group_id", 1, 9999)
+    for side in ("before", "after"):
+        if field in boolean_fields:
+            if type(change[side]) is not bool:
+                raise ValueError(f"{name}.{side} must be a JSON boolean")
+        else:
+            finite(change[side], f"{name}.{side}")
+    if _raw_equal(change["before"], change["after"]):
+        raise ValueError(f"{name} must require a changed raw value")
+    return change
+
+
+def _effect_checks(value: object, watches: list[int]) -> list:
+    rows = _array(value, "required_effect_checks", 0, MAX_WITNESSES)
+    ids = set()
+    for row in rows:
+        _fields(
+            row,
+            "effect check",
+            {
+                "id",
+                "event",
+                "player",
+                "object_group_id",
+                "command_window",
+                "min_events",
+                "native_return",
+                "player_change",
+                "target_change",
+            },
+        )
+        identifier = _id(row["id"], "effect check.id")
+        if identifier in ids:
+            raise ValueError("Duplicate effect check id")
+        ids.add(identifier)
+        event = row["event"]
+        if not isinstance(event, str) or event not in _EFFECT_EVENTS:
+            raise ValueError("Effect checks require a supported applied mechanic hook")
+        _window(row["command_window"], "effect check.command_window")
+        _int(row["min_events"], "effect check.min_events", 1, 4096)
+        actor = row["player"]
+        if actor is not None:
+            _int(actor, "effect check.player", 1, 2)
+        group = row["object_group_id"]
+        if group is not None:
+            _int(group, "effect check.object_group_id", 1, 9999)
+            if group not in watches:
+                raise ValueError("Effect object_group_id must be a declared watch group")
+        player_change = _effect_change(row["player_change"], "effect check.player_change", target=False)
+        target_change = _effect_change(row["target_change"], "effect check.target_change", target=True)
+        if target_change is not None and target_change["group_id"] not in watches:
+            raise ValueError("Effect target_change group must be a declared watch group")
+        actor_event = event.startswith("PlayerObject::") or event == "PlayLayer::destroyPlayer"
+        if actor_event:
+            if actor is None or group is None or player_change is None or target_change is not None:
+                raise ValueError(
+                    "Collision/death effect checks require an actor, watched object and player change"
+                )
+            if event == "PlayLayer::destroyPlayer" and (
+                player_change["field"] != "is_dead" or player_change["after"] is not True
+            ):
+                raise ValueError("Death effect checks require a changed is_dead=true observation")
+        elif actor is not None or group is not None or player_change is not None or target_change is None:
+            raise ValueError(
+                "Group effect checks require a watched target change and no actor/object selector"
+            )
+        if event == "PlayerObject::collidedWithObject":
+            if row["native_return"] is not True:
+                raise ValueError("Collision effect checks require native_return=true")
+        elif row["native_return"] is not None:
+            raise ValueError("Void effect checks require native_return=null")
+    return rows
+
+
 def validate_fixture_matrix(data: object) -> dict:
     """Validate a bounded, versioned catalogue; native verification stays separate."""
     matrix = _fields(data, "fixture matrix", {"schema_version", "kind", "provenance", "clock", "cases"})
-    if type(matrix["schema_version"]) is not int or matrix["schema_version"] not in {1, 2}:
-        raise ValueError("Expected fixture matrix schema_version 1 or 2")
+    if type(matrix["schema_version"]) is not int or matrix["schema_version"] not in {1, 2, 3}:
+        raise ValueError("Expected fixture matrix schema_version 1, 2 or 3")
     if matrix["kind"] != "native_fixture_matrix" or matrix["clock"] != "processCommands_call_index":
         raise ValueError("Expected kind native_fixture_matrix and processCommands_call_index clock")
     provenance = _fields(matrix["provenance"], "provenance", {"origin", "native_verification"})
@@ -163,12 +307,19 @@ def validate_fixture_matrix(data: object) -> dict:
         _fields(
             case,
             "case",
-            {"id", "label", "level_string", "level_sha256", "mechanics_intent", "runs", "response_checks"},
+            {"id", "label", "level_string", "level_sha256", "mechanics_intent", "runs", "response_checks"}
+            | ({"watch_groups"} if matrix["schema_version"] == 3 else set()),
         )
         case_id = _id(case["id"], "case.id")
         if case_id in case_ids:
             raise ValueError("Duplicate fixture case id")
         case_ids.add(case_id)
+        if matrix["schema_version"] == 3:
+            watches = _array(case["watch_groups"], "case.watch_groups", 0, 8)
+            for group in watches:
+                _int(group, "case.watch_groups item", 1, 9999)
+            if len(set(watches)) != len(watches):
+                raise ValueError("Duplicate case watch group")
         string(case["label"], "case.label")
         level = case["level_string"]
         if not isinstance(level, str):
@@ -196,7 +347,12 @@ def validate_fixture_matrix(data: object) -> dict:
                 run,
                 "run",
                 {"id", "role", "input_mode", "inputs", "expected_outcome", "required_mode_sequences"}
-                | ({"required_mechanics_sequences"} if matrix["schema_version"] == 2 else set()),
+                | ({"required_mechanics_sequences"} if matrix["schema_version"] >= 2 else set())
+                | (
+                    {"required_state_witnesses", "required_effect_checks"}
+                    if matrix["schema_version"] == 3
+                    else set()
+                ),
             )
             run_id = _id(run["id"], "run.id")
             if run_id in run_map:
@@ -222,8 +378,15 @@ def validate_fixture_matrix(data: object) -> dict:
             }:
                 raise ValueError("Invalid fixture expected_outcome")
             _mode_sequences(run["required_mode_sequences"], "required_mode_sequences")
-            if matrix["schema_version"] == 2:
+            if matrix["schema_version"] >= 2:
                 _mechanics_sequences(run["required_mechanics_sequences"], run["required_mode_sequences"])
+            if matrix["schema_version"] == 3:
+                _state_witnesses(run["required_state_witnesses"])
+                _effect_checks(run["required_effect_checks"], watches)
+                if not run["required_state_witnesses"] and not run["required_effect_checks"]:
+                    raise ValueError(
+                        "Matrix3 runs require at least one state witness or applied effect check"
+                    )
         if sum(run["role"] == "baseline" for run in runs) != 1:
             raise ValueError("Each fixture requires exactly one observation baseline")
         if sum(run["role"] == "replay" for run in runs) != 1:
@@ -235,7 +398,7 @@ def validate_fixture_matrix(data: object) -> dict:
                 check,
                 "response check",
                 {"id", "reference_run", "changed_run", "player", "fields", "mode"}
-                | ({"required_mechanics"} if matrix["schema_version"] == 2 else set()),
+                | ({"required_mechanics"} if matrix["schema_version"] >= 2 else set()),
             )
             check_id = _id(check["id"], "response_check.id")
             if check_id in check_ids:
@@ -248,7 +411,7 @@ def validate_fixture_matrix(data: object) -> dict:
                     raise ValueError("Response checks must name two owned replay runs in the fixture")
                 pair.append(run_map[run_id])
             player = _int(check["player"], "response_check.player", 1, 2)
-            if matrix["schema_version"] == 2:
+            if matrix["schema_version"] >= 2:
                 _response_mechanics(check["required_mechanics"], player)
             if not isinstance(check["mode"], str) or check["mode"] not in MODES:
                 raise ValueError("Response check mode must name a supported observed mode")
@@ -284,13 +447,14 @@ def get_fixture_run(matrix: dict, case_id: str, run_id: str) -> dict:
                 "case_id": case_id,
                 "level_string": case["level_string"],
                 "level_sha256": case["level_sha256"],
+                **({"watch_groups": case["watch_groups"]} if matrix["schema_version"] == 3 else {}),
                 **run,
             }
     raise ValueError(f"Unknown fixture run: {case_id}/{run_id}")
 
 
 def _pre_end_rows(capture: dict) -> list[dict]:
-    if capture["schema_version"] not in {2, 3}:
+    if capture["schema_version"] < 2:
         return []
     return [
         row
@@ -310,7 +474,7 @@ def _observed_mode_sequences(capture: dict, *, active_player2: bool = False) -> 
         state = row["state"]
         for player in result:
             if player == "player2" and active_player2:
-                if capture["schema_version"] != 3 or not state["dual_active"]:
+                if capture["schema_version"] < 3 or not state["dual_active"]:
                     continue
             mode = None if state[player] is None else state[player]["mode"]
             _append_change(result[player], mode)
@@ -324,13 +488,13 @@ def _observed_mechanics_sequences(capture: dict) -> tuple[dict, dict]:
         "dual_active": None,
     }
     availability = {
-        "native_schema3_fields": capture["schema_version"] == 3,
+        "native_schema3_fields": capture["schema_version"] >= 3,
         "player1": {field: False for field in _MECHANICS_FIELDS},
         "player2": {field: False for field in _MECHANICS_FIELDS},
         "dual_active": False,
         "player2_active_samples": 0,
     }
-    if capture["schema_version"] != 3:
+    if capture["schema_version"] < 3:
         return observed, availability
     observed["dual_active"] = []
     for player in ("player1", "player2"):
@@ -387,11 +551,199 @@ def _mechanics_checks(required: dict, observed: dict, availability: dict, modes:
     return checks
 
 
+def _witness_observations(capture: dict, declarations: list) -> list[dict]:
+    available = capture["schema_version"] == 4
+    results = []
+    rows = _pre_end_rows(capture) if available else []
+    for declaration in declarations:
+        actor = f"player{declaration['player']}"
+        matches = []
+        first_sample = None
+        window = declaration["command_window"]
+        for row in rows:
+            command, state = row["command_index"], row["state"]
+            player = state[actor]
+            if not window["first"] <= command <= window["last"] or player is None:
+                continue
+            if declaration["player"] == 2 and not state["dual_active"]:
+                continue
+            if player["mode"] != declaration["mode"]:
+                continue
+            actual = {
+                **{key: player[key] for key in (*_CONTACT_FIELDS, *_MECHANICS_FIELDS, "y")},
+                "dual_active": state["dual_active"],
+            }
+            matched = True
+            for field, expected in declaration["predicates"].items():
+                if expected is None:
+                    continue
+                if field == "y":
+                    matched &= expected["minimum"] <= actual[field] <= expected["maximum"]
+                else:
+                    matched &= _raw_equal(actual[field], expected)
+            if matched:
+                matches.append(command)
+                if first_sample is None:
+                    first_sample = {
+                        "command_index": command,
+                        "update_sequence": row["update_sequence"],
+                        "scheduler_sequence": row["scheduler_sequence"],
+                        "mode": player["mode"],
+                        "observed_predicates": actual,
+                    }
+        results.append(
+            {
+                "id": declaration["id"],
+                "available": available,
+                "matched": available and len(matches) >= declaration["min_samples"],
+                "required_min_samples": declaration["min_samples"],
+                "matching_sample_count": len(matches),
+                "matching_command_indices": matches,
+                "first_matching_sample": first_sample,
+            }
+        )
+    return results
+
+
+def _event_pre_ending(event: dict) -> bool:
+    return all(
+        not event[key][field]
+        for key in ("phase_before", "phase_after")
+        for field in ("level_end_animation_started", "has_completed_level")
+    )
+
+
+def _watch_value(rows: list, group: int, field: str) -> object:
+    return next((row[field] for row in rows if row["group_id"] == group), None)
+
+
+def _effect_observations(capture: dict, declarations: list) -> list[dict]:
+    available = capture["schema_version"] == 4
+    events = capture["attempt"]["mechanic_events"] if available else []
+    trace = _pre_end_rows(capture) if available else []
+    results = []
+    for declaration in declarations:
+        witnesses, matched_sequences = [], []
+        window = declaration["command_window"]
+        for event in events:
+            command = event["command_index"]
+            if (
+                event["event"] != declaration["event"]
+                or event["player"] != declaration["player"]
+                or not window["first"] <= command <= window["last"]
+                or not _event_pre_ending(event)
+                or not _raw_equal(event["native_return"], declaration["native_return"])
+            ):
+                continue
+            group = declaration["object_group_id"]
+            if group is not None and (event["object"] is None or group not in event["object"]["group_ids"]):
+                continue
+            evidence = {
+                "event_sequence": event["sequence"],
+                "event": event["event"],
+                "event_command_index": command,
+                "in_command": event["in_command"],
+                "update_sequence": event["update_sequence"],
+                "scheduler_sequence": event["scheduler_sequence"],
+                "arguments": event["arguments"],
+                "object": event["object"],
+                "native_return": event["native_return"],
+            }
+            change = declaration["player_change"]
+            if change is not None:
+                actor = f"player{declaration['player']}"
+                before, after = event["state_before"], event["state_after"]
+                if declaration["player"] == 2 and not (before["dual_active"] and after["dual_active"]):
+                    continue
+                if before[actor] is None or after[actor] is None:
+                    continue
+                field = change["field"]
+                if not (
+                    _raw_equal(before[actor][field], change["before"])
+                    and _raw_equal(after[actor][field], change["after"])
+                ):
+                    continue
+                evidence["player_transition"] = {
+                    "source": "paired_native_callback",
+                    "player": declaration["player"],
+                    "field": field,
+                    "before": before[actor][field],
+                    "after": after[actor][field],
+                    "mode_before": before[actor]["mode"],
+                    "mode_after": after[actor]["mode"],
+                    "dual_active_before": before["dual_active"],
+                    "dual_active_after": after["dual_active"],
+                }
+            change = declaration["target_change"]
+            if change is not None:
+                field, group = change["field"], change["group_id"]
+                argument = (
+                    "target_group_id" if event["event"] == "GJBaseGameLayer::triggerMoveCommand" else "group"
+                )
+                if event["arguments"][argument] != group:
+                    continue
+                actual_before = _watch_value(event["watched_before"], group, field)
+                if not _raw_equal(actual_before, change["before"]):
+                    continue
+                actual_after = _watch_value(event["watched_after"], group, field)
+                transition = None
+                if _raw_equal(actual_after, change["after"]):
+                    transition = {
+                        "source": "paired_native_callback",
+                        "command_index": command,
+                        "update_sequence": event["update_sequence"],
+                        "scheduler_sequence": event["scheduler_sequence"],
+                    }
+                else:
+                    for row in trace:
+                        # A trace has no wall timestamp. A strictly later command
+                        # is explicit command-order evidence; same-counter rows
+                        # cannot establish that they followed the paired call.
+                        if not command < row["command_index"] <= window["last"]:
+                            continue
+                        value = _watch_value(row["watched_objects"], group, field)
+                        if _raw_equal(value, change["after"]):
+                            actual_after = value
+                            transition = {
+                                "source": "later_pre_ending_command_sample",
+                                "command_index": row["command_index"],
+                                "update_sequence": row["update_sequence"],
+                                "scheduler_sequence": row["scheduler_sequence"],
+                            }
+                            break
+                if transition is None:
+                    continue
+                evidence["target_transition"] = {
+                    **transition,
+                    "group_id": group,
+                    "field": field,
+                    "before": actual_before,
+                    "after": actual_after,
+                    "chronology_scope": "paired_original_return_or_strictly_later_command_index",
+                }
+            matched_sequences.append(event["sequence"])
+            if len(witnesses) < MAX_WITNESSES:
+                witnesses.append(evidence)
+        results.append(
+            {
+                "id": declaration["id"],
+                "available": available,
+                "matched": available and len(matched_sequences) >= declaration["min_events"],
+                "required_min_events": declaration["min_events"],
+                "matching_event_count": len(matched_sequences),
+                "matching_event_sequences": matched_sequences,
+                "witnesses": witnesses,
+                "omitted_witness_count": len(matched_sequences) - len(witnesses),
+            }
+        )
+    return results
+
+
 def _evaluate_capture(matrix: dict, case_id: str, run_id: str, capture: dict) -> dict:
     run = get_fixture_run(matrix, case_id, run_id)
     attempt = capture["attempt"]
     source = "unknown" if run["input_mode"] == "observation" else "replay"
-    mechanics_required = matrix["schema_version"] == 2
+    mechanics_required = matrix["schema_version"] >= 2
     observed_modes = _observed_mode_sequences(capture, active_player2=mechanics_required)
     mode_checks = {
         player: required is None or observed_modes[player] == required
@@ -416,12 +768,15 @@ def _evaluate_capture(matrix: dict, case_id: str, run_id: str, capture: dict) ->
             event["command_index"] <= attempt["terminal"]["command_index"] for event in run["inputs"]
         ),
         "native_callbacks_observed": not missing_callbacks,
-        "native_phase_boundary_available": capture["schema_version"] in {2, 3},
+        "native_phase_boundary_available": capture["schema_version"] >= 2,
         "terminal_outcome_matches": attempt["terminal"]["outcome"] in {"completed", "died"}
         if run["expected_outcome"] == "any_terminal"
         else attempt["terminal"]["outcome"] == run["expected_outcome"],
         "required_modes_observed": all(mode_checks.values()),
     }
+    if capture["schema_version"] == 4:
+        expected_driver = "none" if run["input_mode"] == "observation" else "owned-pre-command"
+        checks["input_delivery_matches_fixture_role"] = attempt["input_delivery"]["driver"] == expected_driver
     result = {
         "schema_version": matrix["schema_version"],
         "kind": "native_fixture_inspection",
@@ -433,7 +788,7 @@ def _evaluate_capture(matrix: dict, case_id: str, run_id: str, capture: dict) ->
         "checks": checks,
         "observed_mode_sequences": observed_modes,
         "mode_observation_scope": "before_native_end_animation"
-        if capture["schema_version"] in {2, 3}
+        if capture["schema_version"] >= 2
         else "unavailable_schema1",
         "mode_checks": mode_checks,
         "missing_native_callbacks": missing_callbacks,
@@ -470,6 +825,29 @@ def _evaluate_capture(matrix: dict, case_id: str, run_id: str, capture: dict) ->
         result["limitations"] += [
             "Mechanics sequences use selected raw schema-3 fields, not inferred portal effects or physical calibration.",
             "Player-2 mode/mechanics samples require recorded dual_active=true; pointer existence proves no dual activity.",
+        ]
+    if matrix["schema_version"] == 3:
+        witnesses = _witness_observations(capture, run["required_state_witnesses"])
+        effects = _effect_observations(capture, run["required_effect_checks"])
+        checks.update(
+            native_contact_effect_fields_available=capture["schema_version"] == 4,
+            watch_groups_match=capture["schema_version"] == 4
+            and [watch["group_id"] for watch in capture["object_watches"]] == run["watch_groups"],
+            required_state_witnesses_observed=all(row["matched"] for row in witnesses),
+            required_effect_checks_observed=all(row["matched"] for row in effects),
+        )
+        result.update(
+            state_witness_checks=witnesses,
+            effect_checks=effects,
+            declared_watch_groups=run["watch_groups"],
+            observed_object_watches=capture["object_watches"] if capture["schema_version"] == 4 else None,
+            contact_effect_observation_scope="schema4_joint_pre_ending_fields_and_paired_runtime_events",
+            status="fixture_observations_match" if all(checks.values()) else "fixture_observations_mismatch",
+        )
+        result["limitations"] += [
+            "Ground/slope witnesses are selected raw flags jointly sampled at declared commands; they do not reconstruct collision geometry.",
+            "Applied effect checks require actual callback receipts and changed selected values; object IDs or dispatch callbacks alone satisfy no effect check.",
+            "Later target transitions use strictly later command indices, not inferred wall-clock ordering or isolated causal attribution.",
         ]
     return result
 
@@ -511,8 +889,8 @@ def compare_fixture_response(
     first_difference = None
     shared_rows = 0
     shared_mode_rows = 0
-    predicates_required = matrix["schema_version"] == 2
-    mechanics_available = reference["schema_version"] == 3 and changed["schema_version"] == 3
+    predicates_required = matrix["schema_version"] >= 2
+    mechanics_available = reference["schema_version"] >= 3 and changed["schema_version"] >= 3
     selected_prefix_matches = True
     for left, right in zip(reference["attempt"]["trace"], changed["attempt"]["trace"]):
         lhs, rhs = left["state"][player], right["state"][player]
@@ -523,7 +901,7 @@ def compare_fixture_response(
                 selected_prefix_matches = False
         if lhs is None or rhs is None:
             continue
-        if reference["schema_version"] not in {2, 3} or changed["schema_version"] not in {2, 3}:
+        if reference["schema_version"] < 2 or changed["schema_version"] < 2:
             continue
         if any(
             row["phase"]["level_end_animation_started"] or row["phase"]["has_completed_level"]
@@ -573,6 +951,27 @@ def compare_fixture_response(
         "input_plans_differ": first_changed_input is not None,
         "selected_response_differs": first_difference is not None,
     }
+    if reference["schema_version"] == 4 or changed["schema_version"] == 4:
+        checks["owned_replay_delivery_in_both_captures"] = all(
+            capture["schema_version"] != 4
+            or capture["attempt"]["input_delivery"]["driver"] == "owned-pre-command"
+            for capture in (reference, changed)
+        )
+        checks["same_selected_initial_watched_objects"] = (
+            reference["schema_version"] == 4
+            and changed["schema_version"] == 4
+            and reference["attempt"]["trace"][0]["watched_objects"]
+            == changed["attempt"]["trace"][0]["watched_objects"]
+        )
+        checks["same_watched_prefix_before_changed_input"] = (
+            reference["schema_version"] == 4
+            and changed["schema_version"] == 4
+            and all(
+                left["watched_objects"] == right["watched_objects"]
+                for left, right in zip(reference["attempt"]["trace"], changed["attempt"]["trace"])
+                if first_changed_input is not None and left["command_index"] < first_changed_input
+            )
+        )
     if predicates_required:
         checks["mechanics_predicates_available"] = mechanics_available
         checks["shared_mechanics_predicate_samples_observed"] = shared_rows > 0
@@ -603,8 +1002,8 @@ def compare_fixture_response(
         result.update(
             required_mechanics=check["required_mechanics"],
             mechanics_predicate_availability={
-                "reference_schema3": reference["schema_version"] == 3,
-                "changed_schema3": changed["schema_version"] == 3,
+                "reference_schema3": reference["schema_version"] >= 3,
+                "changed_schema3": changed["schema_version"] >= 3,
             },
             shared_pre_ending_mode_samples=shared_mode_rows,
             shared_mechanics_predicate_samples=shared_rows,
