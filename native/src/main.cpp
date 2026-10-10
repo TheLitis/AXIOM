@@ -3,6 +3,8 @@
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/PlayerObject.hpp>
 #include <Geode/modify/CCScheduler.hpp>
+#include <Geode/modify/UILayer.hpp>
+#include <Geode/modify/EffectGameObject.hpp>
 #include <Windows.h>
 #include <bcrypt.h>
 #include <algorithm>
@@ -22,14 +24,23 @@ using Clock = std::chrono::steady_clock;
 constexpr size_t MaxBytes = 16 * 1024 * 1024;
 constexpr size_t MaxCommands = 20000;
 constexpr size_t MaxInputs = 12000;
-constexpr char Policy[] = "process-commands-pre-hook-owned-input-v1";
+constexpr size_t MaxEvents = 4096;
+constexpr size_t MaxQueue = 256;
+constexpr size_t MaxGroups = 64;
+constexpr size_t MaxWatches = 8;
+constexpr char Policy[] = "process-commands-scheduled-delivery-v2";
 enum class ClockPolicy { Native, FixedBase60, FixedScheduler240 };
+enum class InputDriver { None, Owned, UiCallback };
 ClockPolicy clockPolicy = ClockPolicy::Native;
+InputDriver inputDriver = InputDriver::Owned;
+std::vector<int> watchGroups;
 std::string clockSelectionError;
+std::string deliverySelectionError;
 size_t updateDepth = 0;
 size_t schedulerDepth = 0;
 size_t phaseDepth = 0;
 size_t commandDepth = 0;
+size_t eventDepth = 0;
 std::filesystem::path executablePath();
 
 void selectClockPolicy() {
@@ -47,6 +58,33 @@ void selectClockPolicy() {
         return;
     }
     clockPolicy = choice == "fixed-base-60" ? ClockPolicy::FixedBase60 : ClockPolicy::FixedScheduler240;
+}
+void selectDelivery() {
+    auto choice = Mod::get()->getLaunchArgument("input-driver").value_or("owned-pre-command");
+    if (choice != "owned-pre-command" && choice != "scheduled-ui-callback")
+        throw std::runtime_error("Unsupported input-driver launch argument");
+    inputDriver = choice == "scheduled-ui-callback" ? InputDriver::UiCallback : InputDriver::Owned;
+    auto groups = Mod::get()->getLaunchArgument("watch-groups").value_or("");
+    if (inputDriver == InputDriver::UiCallback || !groups.empty()) {
+        if (_wcsicmp(executablePath().filename().c_str(), L"AXIOMSandbox.exe") != 0 ||
+                !Loader::get()->getLaunchFlag("axiom-sandbox"))
+            throw std::runtime_error("UI callback/watch experiment requires guarded AXIOMSandbox.exe");
+    }
+    size_t offset = 0;
+    while (offset < groups.size()) {
+        auto end = groups.find(',', offset);
+        auto item = groups.substr(offset, end == std::string::npos ? std::string::npos : end - offset);
+        if (item.empty() || !std::all_of(item.begin(), item.end(), [](char c) { return c >= '0' && c <= '9'; }))
+            throw std::runtime_error("watch-groups requires comma-separated positive IDs");
+        auto group = std::stoul(item);
+        if (group < 1 || group > 9999 || watchGroups.size() >= MaxWatches ||
+                std::find(watchGroups.begin(), watchGroups.end(), group) != watchGroups.end())
+            throw std::runtime_error("Invalid, duplicate or excessive watched group");
+        watchGroups.push_back(static_cast<int>(group));
+        if (end == std::string::npos) break;
+        offset = end + 1;
+        if (offset == groups.size()) throw std::runtime_error("Trailing watched-group separator");
+    }
 }
 
 // Environment documents contain no floating point values. Sorting keys recursively
@@ -126,6 +164,7 @@ std::filesystem::path executablePath() {
 }
 Json environment() {
     if (!clockSelectionError.empty()) throw std::runtime_error(clockSelectionError);
+    if (!deliverySelectionError.empty()) throw std::runtime_error(deliverySelectionError);
     std::vector<Mod*> mods;
     for (auto mod : Loader::get()->getAllMods()) if (mod->isLoaded()) mods.push_back(mod);
     std::sort(mods.begin(), mods.end(), [](auto a, auto b) { return std::string(a->getID()) < std::string(b->getID()); });
@@ -168,7 +207,8 @@ Json playerState(PlayerObject* player) {
         {"is_dead", player->m_isDead}, {"mode", mode},
         {"gravity_inverted", player->m_isUpsideDown},
         {"vehicle_size", checked(player->m_vehicleSize)},
-        {"player_speed", checked(player->m_playerSpeed)}});
+        {"player_speed", checked(player->m_playerSpeed)},
+        {"is_on_ground", player->m_isOnGround}, {"is_on_slope", player->m_isOnSlope}});
 }
 Json state(GJBaseGameLayer* layer) {
     return matjson::makeObject({{"player1", playerState(layer->m_player1)},
@@ -183,6 +223,28 @@ Json phase(GJBaseGameLayer* layer) {
 }
 Json membership(std::vector<size_t> const& stack) {
     return stack.empty() ? Json(nullptr) : Json(static_cast<uint64_t>(stack.back()));
+}
+Json remap(gd::vector<int> const* keys) {
+    if (!keys) return nullptr;
+    if (keys->size() > MaxGroups) throw std::runtime_error("Remap vector limit reached");
+    Json result = Json::array();
+    for (auto key : *keys) result.push(key);
+    return result;
+}
+Json entity(GameObject* object) {
+    if (!object) return nullptr;
+    if (object->m_groupCount < 0 || static_cast<size_t>(object->m_groupCount) > MaxGroups)
+        throw std::runtime_error("Object group limit reached");
+    std::set<int> groups;
+    for (int i = 0; i < object->m_groupCount; ++i) {
+        auto group = object->getGroupID(i);
+        if (group < 1 || group > 9999) throw std::runtime_error("Invalid native object group");
+        groups.insert(group);
+    }
+    Json list = Json::array();
+    for (auto group : groups) list.push(group);
+    return matjson::makeObject({{"object_id", object->m_objectID},
+        {"runtime_unique_id", object->m_uniqueID}, {"group_ids", list}});
 }
 struct ReplayEvent { uint64_t command; int player; int button; bool pressed; };
 uint64_t integer(Json const& value, uint64_t minimum, uint64_t maximum) {
@@ -252,16 +314,20 @@ struct Run {
     bool inCommand = false;
     bool injecting = false;
     bool replay = false;
+    InputDriver driver = InputDriver::None;
     bool terminal = false;
     bool terminalSnapshotReady = false;
     bool complete = true;
     Clock::time_point start = Clock::now();
     std::vector<size_t> updates;
     std::vector<size_t> schedulers;
+    std::vector<size_t> deliveryStack;
+    std::vector<size_t> mechanicStack;
+    std::vector<std::pair<int, GameObject*>> watches;
     std::vector<ReplayEvent> planned;
     size_t next = 0;
     explicit Run(GJBaseGameLayer* owner) : layer(owner) { layer->retain(); }
-    ~Run() { layer->release(); }
+    ~Run() { for (auto const& watch : watches) watch.second->release(); layer->release(); }
     Json& attempt() { return document["attempt"]; }
     void error(std::string const& message) {
         complete = false;
@@ -269,6 +335,99 @@ struct Run {
     }
     int64_t wallTime() const {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
+    }
+    int actor(PlayerObject* player) const {
+        if (!player) return 0;
+        return player == layer->m_player1 ? 1 : player == layer->m_player2 ? 2 : 0;
+    }
+    bool watched(GameObject* object) const {
+        return object && std::any_of(watches.begin(), watches.end(),
+            [object](auto const& watch) { return watch.second == object; });
+    }
+    void resolveWatches() {
+        Json declarations = Json::array();
+        for (auto groupID : watchGroups) {
+            auto group = layer->getGroup(groupID);
+            if (!group || group->count() != 1) throw std::runtime_error("Watched group must contain exactly one native object");
+            auto object = static_cast<GameObject*>(group->objectAtIndex(0));
+            if (!object) throw std::runtime_error("Null watched group member");
+            auto identity = entity(object);
+            bool member = false;
+            for (auto const& value : identity["group_ids"]) if (value.asInt().unwrap() == groupID) member = true;
+            if (!member) throw std::runtime_error("Watched object does not declare its selector group");
+            object->retain();
+            watches.emplace_back(groupID, object);
+            declarations.push(matjson::makeObject({{"group_id", groupID},
+                {"object_id", object->m_objectID}, {"runtime_unique_id", object->m_uniqueID}}));
+        }
+        document["object_watches"] = declarations;
+    }
+    Json watchedState() const {
+        Json result = Json::array();
+        for (auto const& [group, object] : watches)
+            result.push(matjson::makeObject({{"group_id", group}, {"x", checked(object->m_positionX)},
+                {"y", checked(object->m_positionY)}, {"is_group_disabled", object->m_isGroupDisabled},
+                {"is_disabled", object->m_isDisabled}}));
+        return result;
+    }
+    Json queuedButtons() const {
+        if (layer->m_queuedButtons.size() > MaxQueue) throw std::runtime_error("Native queued-button limit reached");
+        Json result = Json::array();
+        for (auto const& queued : layer->m_queuedButtons)
+            result.push(matjson::makeObject({{"button", static_cast<int>(queued.m_button)},
+                {"pressed", queued.m_isPush}, {"player", queued.m_isPlayer2 ? 2 : 1},
+                {"step", queued.m_step}, {"timestamp", checked(queued.m_timestamp)}}));
+        return result;
+    }
+    size_t enterDelivery(char const* event, Json arguments) {
+        auto& records = attempt()["delivery_events"];
+        if (records.size() >= MaxEvents) { ++dropped; throw std::runtime_error("Delivery event limit reached"); }
+        auto index = records.size();
+        records.push(matjson::makeObject({{"sequence", static_cast<uint64_t>(index)},
+            {"parent_sequence", membership(deliveryStack)}, {"event", event}, {"command_index", command},
+            {"in_command", inCommand}, {"update_sequence", membership(updates)},
+            {"scheduler_sequence", membership(schedulers)}, {"arguments", arguments},
+            {"phase_before", phase(layer)}, {"phase_after", nullptr},
+            {"wall_enter_ns", wallTime()}, {"wall_exit_ns", nullptr},
+            {"queue_before", queuedButtons()}, {"queue_after", nullptr},
+            {"layer_timestamp_before", checked(layer->m_timestamp)}, {"layer_timestamp_after", nullptr}}));
+        deliveryStack.push_back(index);
+        return index;
+    }
+    void exitDelivery(size_t index) {
+        auto& record = attempt()["delivery_events"][index];
+        record["queue_after"] = queuedButtons();
+        record["layer_timestamp_after"] = checked(layer->m_timestamp);
+        record["phase_after"] = phase(layer);
+        record["wall_exit_ns"] = wallTime();
+        if (deliveryStack.empty() || deliveryStack.back() != index) throw std::runtime_error("Delivery nesting mismatch");
+        deliveryStack.pop_back();
+    }
+    size_t enterMechanic(char const* event, int player, GameObject* object, Json arguments) {
+        auto& records = attempt()["mechanic_events"];
+        if (records.size() >= MaxEvents) { ++dropped; throw std::runtime_error("Mechanic event limit reached"); }
+        auto index = records.size();
+        records.push(matjson::makeObject({{"sequence", static_cast<uint64_t>(index)},
+            {"parent_sequence", membership(mechanicStack)}, {"event", event}, {"command_index", command},
+            {"in_command", inCommand}, {"update_sequence", membership(updates)},
+            {"scheduler_sequence", membership(schedulers)}, {"player", player ? Json(player) : Json(nullptr)},
+            {"object", entity(object)}, {"arguments", arguments},
+            {"state_before", state(layer)}, {"state_after", nullptr},
+            {"watched_before", watchedState()}, {"watched_after", nullptr},
+            {"phase_before", phase(layer)}, {"phase_after", nullptr}, {"native_return", nullptr},
+            {"wall_enter_ns", wallTime()}, {"wall_exit_ns", nullptr}}));
+        mechanicStack.push_back(index);
+        return index;
+    }
+    void exitMechanic(size_t index, Json returned = nullptr) {
+        auto& record = attempt()["mechanic_events"][index];
+        record["state_after"] = state(layer);
+        record["watched_after"] = watchedState();
+        record["phase_after"] = phase(layer);
+        record["native_return"] = returned;
+        record["wall_exit_ns"] = wallTime();
+        if (mechanicStack.empty() || mechanicStack.back() != index) throw std::runtime_error("Mechanic nesting mismatch");
+        mechanicStack.pop_back();
     }
     size_t enterUpdate(char const* stream, float original, float delivered, std::vector<size_t>& stack) {
         checked(original); checked(delivered);
@@ -315,6 +474,7 @@ struct Run {
         if (attempt()["trace"].size() >= MaxCommands + 1) { ++dropped; throw std::runtime_error("Command trace limit reached"); }
         attempt()["trace"].push(matjson::makeObject({{"command_index", command}, {"dt_seconds", checked(dt)},
             {"is_half_tick", half}, {"is_last_tick", last}, {"state", state(layer)},
+            {"watched_objects", watchedState()},
             {"phase", phase(layer)}, {"update_sequence", membership(updates)},
             {"scheduler_sequence", membership(schedulers)}}));
     }
@@ -327,7 +487,9 @@ struct Run {
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
         attempt()["inputs"].push(matjson::makeObject({{"sequence", sequence++}, {"command_index", command},
             {"player", player}, {"button", button}, {"pressed", pressed}, {"phase", phase},
-            {"source", replay ? "replay" : "observed"}, {"native_return", returned}, {"wall_time_ns", elapsed}}));
+            {"source", driver == InputDriver::Owned ? "replay" : "observed"}, {"native_return", returned},
+            {"in_command", inCommand}, {"update_sequence", membership(updates)},
+            {"scheduler_sequence", membership(schedulers)}, {"wall_time_ns", elapsed}}));
     }
     void blockedInput(int button, int player, bool pressed) {
         if (terminal) return;
@@ -347,6 +509,7 @@ struct Run {
         attempt()["terminal"] = matjson::makeObject({{"outcome", outcome}, {"event", event},
             {"command_index", command}, {"wall_elapsed_seconds", std::chrono::duration<double>(Clock::now() - start).count()},
             {"state", state(layer)}, {"phase", phase(layer)}, {"update_sequence", membership(updates)},
+            {"watched_objects", watchedState()},
             {"scheduler_sequence", membership(schedulers)}});
         terminalSnapshotReady = true;
     }
@@ -378,6 +541,8 @@ struct Run {
             previous = commandIndex;
             planned.push_back({commandIndex, static_cast<int>(integer(entry["player"], 1, 2)),
                 static_cast<int>(integer(entry["button"], 1, 3)), entry["pressed"].asBool().unwrap()});
+            if (driver == InputDriver::UiCallback && (planned.back().player != 1 || planned.back().button != 1))
+                throw std::runtime_error("Scheduled UI callback supports only player1/button1");
         }
         attempt()["replay_sha256"] = sha(raw);
         attempt()["planned_inputs"] = data["inputs"];
@@ -411,7 +576,7 @@ std::unique_ptr<PlayLayer, ReleaseLayer> cancelPendingStart(PlayLayer* layer) {
 }
 
 void exportRun() {
-    if (!active || !active->terminal || active->inCommand || commandDepth || updateDepth || schedulerDepth || phaseDepth) return;
+    if (!active || !active->terminal || active->inCommand || commandDepth || updateDepth || schedulerDepth || phaseDepth || eventDepth) return;
     auto run = std::move(active);
     if (auto indicator = run->layer->getChildByID("axiom-capture-indicator")) indicator->removeFromParent();
     if (!run->terminalSnapshotReady) {
@@ -454,7 +619,7 @@ void stop(char const* outcome, char const* event) {
     try { active->finish(outcome, event); exportRun(); } catch (std::exception const& error) { fail(error.what()); }
 }
 void begin(PlayLayer* layer, bool uncertainStart = false) {
-    if (active && (active->inCommand || commandDepth || updateDepth || schedulerDepth || phaseDepth)) {
+    if (active && (active->inCommand || commandDepth || updateDepth || schedulerDepth || phaseDepth || eventDepth)) {
         stop("aborted", "PlayLayer::resetLevel");
         queueStart(layer, true);
         return;
@@ -471,8 +636,10 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
         auto startKind = uncertainStart ? "unknown" : layer->m_isPracticeMode ? "practice" : layer->m_startPosObject ? "start_position" : "level_start";
         active = std::make_unique<Run>(layer);
         active->replay = option("replay-enabled", "replay");
+        active->driver = active->replay ? inputDriver : InputDriver::None;
+        auto driver = active->driver;
         active->document = matjson::makeObject({
-            {"schema_version", 3}, {"kind", "native_capture"},
+            {"schema_version", 4}, {"kind", "native_capture"},
             {"provenance", matjson::makeObject({{"origin", "native-engine-capture"}, {"independently_verified", false}, {"state_completeness", "selected_fields_only"}})},
             {"collector", matjson::makeObject({{"id", "axiom.native-capture"}, {"version", "0.1.0"},
                 {"source_commit", AXIOM_SOURCE_COMMIT}, {"source_tree_sha256", AXIOM_SOURCE_TREE_SHA256},
@@ -482,26 +649,39 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
                 {"game_version", "2.2081"}, {"physics_version", "native-2.2081-uncharacterized"},
                 {"input_policy", Policy}, {"environment_id", envHash}})},
             {"state_fields", Json(std::vector<Json>{"x", "y", "y_velocity", "rotation", "is_dead", "mode",
-                "gravity_inverted", "vehicle_size", "player_speed"})},
+                "gravity_inverted", "vehicle_size", "player_speed", "is_on_ground", "is_on_slope"})},
             {"layer_state_fields", Json(std::vector<Json>{"dual_active"})},
+            {"object_watches", Json::array()},
             {"integrity", matjson::makeObject({{"recording_complete", true}, {"dropped_records", 0}, {"errors", Json::array()}})},
             {"attempt", matjson::makeObject({{"id", std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count()) + "-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(++runId)}, {"start_kind", startKind},
                 {"input_source", active->replay ? "replay" : "unknown"}, {"replay_sha256", nullptr},
+                {"input_delivery", matjson::makeObject({
+                    {"driver", driver == InputDriver::None ? "none" : driver == InputDriver::Owned ? "owned-pre-command" : "scheduled-ui-callback"},
+                    {"provenance", driver == InputDriver::None ? "unknown" : "synthetic-scheduled"},
+                    {"entry_point", driver == InputDriver::None ? Json(nullptr) : Json(driver == InputDriver::Owned ? "GJBaseGameLayer::handleButton" : "UILayer::keyDown/keyUp")},
+                    {"injection_phase", driver == InputDriver::None ? "none" : "processCommands-entry-before-original"},
+                    {"timestamp_policy", driver == InputDriver::UiCallback ? "layer-m_timestamp" : "not-applicable"}})},
                 {"planned_inputs", Json::array()}, {"inputs", Json::array()}, {"blocked_inputs", Json::array()},
                 {"trace", Json::array()}, {"updates", Json::array()}, {"scheduler_updates", Json::array()},
-                {"phase_events", Json::array()}, {"terminal", nullptr}})},
+                {"phase_events", Json::array()}, {"delivery_events", Json::array()},
+                {"mechanic_events", Json::array()}, {"terminal", nullptr}})},
             {"limitations", Json(std::vector<Json>{"Selected state is not a complete resumable snapshot.",
                 "The processCommands call clock is not a demonstrated physics or hardware input clock.",
                 "Mod settings and all game configuration are not yet exhaustively captured.",
                 "Gravity, size, speed and dual are raw selected fields, not a calibrated physics model or complete state.",
                 "No physical input provenance or human difficulty calibration is established.",
-                "Replay suppresses non-injector handleButton requests of unknown origin and retains blocked_inputs diagnostics.",
+                "Owned replay suppresses non-injector handleButton requests; UI callback and observation routes forward unknown requests and retain actual receipts.",
+                "Scheduled UILayer callbacks are synthetic in-engine delivery, not OS, hardware, human or dispatcher equivalence.",
+                "Collision events cover declared watched object pointers and the actual destroyPlayer cause, not complete collision detection.",
+                "Trigger events cover selected bound callbacks; invocation alone proves neither contact nor a completed trigger effect.",
+                "Watched positions and disabled flags are selected raw GameObject fields; runtime unique IDs are diagnostics, not cross-run identities.",
                 "Direct PlayerObject push/release calls bypassing handleButton are not controlled by replay channel ownership.",
                 "The update and scheduler hooks are not render callbacks or a complete engine clock.",
                 "A callback already running at capture start has no invented paired row; its membership is null.",
                 "Fixed clocks are isolated-process interventions; equivalence to ordinary gameplay is unverified.",
                 "Original update dt and wall timing are cadence diagnostics; delivered dt and call grouping are retained."})}});
+        active->resolveWatches();
         active->trace(0, false, false);
         if (layer->m_isPlatformer) throw std::runtime_error("M1 supports classic levels only");
         if (active->replay) {
@@ -516,7 +696,7 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
 }
 void flushPending() {
     exportRun();
-    if (pendingStart && !commandDepth && !updateDepth && !schedulerDepth && !phaseDepth && (!active || !active->inCommand)) {
+    if (pendingStart && !commandDepth && !updateDepth && !schedulerDepth && !phaseDepth && !eventDepth && (!active || !active->inCommand)) {
         auto layer = std::move(pendingStart);
         auto uncertain = pendingStartUncertain;
         pendingStartUncertain = false;
@@ -531,6 +711,51 @@ struct CommandScope {
         --commandDepth;
         flushPending();
     }
+};
+struct EventScope {
+    EventScope() { ++eventDepth; }
+    ~EventScope() { --eventDepth; flushPending(); }
+};
+struct MechanicPair {
+    EventScope scope;
+    Run* run = active.get();
+    std::optional<size_t> row;
+    template <class Factory>
+    MechanicPair(GJBaseGameLayer* owner, char const* event, int player, GameObject* object,
+            Factory arguments, bool selected = true) {
+        if (run && run->layer == owner && !run->terminal && selected) {
+            try { row = run->enterMechanic(event, player, object, arguments()); }
+            catch (std::exception const& error) { fail(error.what()); }
+        }
+    }
+    void close(Json returned = nullptr) {
+        if (row && active.get() == run) {
+            try { run->exitMechanic(*row, returned); }
+            catch (std::exception const& error) { fail(error.what()); }
+        }
+        row.reset();
+    }
+    ~MechanicPair() { close(); }
+};
+struct DeliveryPair {
+    EventScope scope;
+    Run* run = active.get();
+    std::optional<size_t> row;
+    template <class Factory>
+    DeliveryPair(GJBaseGameLayer* owner, char const* event, Factory arguments, bool selected = true) {
+        if (run && run->layer == owner && !run->terminal && selected) {
+            try { row = run->enterDelivery(event, arguments()); }
+            catch (std::exception const& error) { fail(error.what()); }
+        }
+    }
+    void close() {
+        if (row && active.get() == run) {
+            try { run->exitDelivery(*row); }
+            catch (std::exception const& error) { fail(error.what()); }
+        }
+        row.reset();
+    }
+    ~DeliveryPair() { close(); }
 };
 } // namespace axiom
 
@@ -548,7 +773,7 @@ class $modify(AxiomPlayLayer, PlayLayer) {
         PlayLayer::resetLevel();
         axiom::resetting = nullptr;
         if (axiom::initializing != this) {
-            if (axiom::active && (axiom::active->inCommand || axiom::commandDepth || axiom::updateDepth || axiom::schedulerDepth || axiom::phaseDepth)) {
+            if (axiom::active && (axiom::active->inCommand || axiom::commandDepth || axiom::updateDepth || axiom::schedulerDepth || axiom::phaseDepth || axiom::eventDepth)) {
                 // The enclosing command can continue updating after reset.
                 axiom::queueStart(this, true);
             } else axiom::begin(this, axiom::resetCommandSeen);
@@ -571,7 +796,12 @@ class $modify(AxiomPlayLayer, PlayLayer) {
         axiom::flushPending();
     }
     void destroyPlayer(PlayerObject* player, GameObject* object) {
+        auto run = axiom::active.get();
+        int actor = run ? run->actor(player) : 0;
+        axiom::MechanicPair observation(this, "PlayLayer::destroyPlayer", actor, object,
+            [] { return axiom::Json::object(); }, actor != 0);
         PlayLayer::destroyPlayer(player, object);
+        observation.close();
         if (axiom::active && axiom::active->layer == this && player && player->m_isDead)
             axiom::stop("died", "PlayLayer::destroyPlayer");
     }
@@ -619,7 +849,7 @@ class $modify(AxiomBaseLayer, GJBaseGameLayer) {
     void handleButton(bool down, int button, bool isPlayer1) {
         auto run = axiom::active.get();
         if (run && run->layer == this && !run->terminal) {
-            if (run->replay) {
+            if (run->driver == axiom::InputDriver::Owned) {
                 // A one-shot permit admits only the scheduled wrapper entry.
                 // Native calls nested inside the original handler cannot reuse it.
                 bool scheduled = run->injecting;
@@ -634,6 +864,37 @@ class $modify(AxiomBaseLayer, GJBaseGameLayer) {
             catch (std::exception const& error) { axiom::fail(error.what()); }
         }
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
+    }
+    void processQueuedButtons(float dt, bool clearInputQueue) {
+        axiom::DeliveryPair observation(this, "GJBaseGameLayer::processQueuedButtons", [=] {
+            return matjson::makeObject({{"dt_seconds", axiom::checked(dt)},
+                {"clear_input_queue", clearInputQueue}});
+        }, !m_queuedButtons.empty());
+        GJBaseGameLayer::processQueuedButtons(dt, clearInputQueue);
+    }
+    void triggerMoveCommand(EffectGameObject* object) {
+        axiom::MechanicPair observation(this, "GJBaseGameLayer::triggerMoveCommand", 0, object, [=] {
+            if (!object) throw std::runtime_error("Null move trigger object");
+            return matjson::makeObject({{"target_group_id", object->m_targetGroupID},
+                {"duration", axiom::checked(object->m_duration)},
+                {"move_offset_x", axiom::checked(object->m_moveOffset.x)},
+                {"move_offset_y", axiom::checked(object->m_moveOffset.y)}});
+        });
+        GJBaseGameLayer::triggerMoveCommand(object);
+    }
+    void toggleGroupTriggered(int group, bool activate, gd::vector<int> const& keys, int triggerID, int controlID) {
+        axiom::MechanicPair observation(this, "GJBaseGameLayer::toggleGroupTriggered", 0, nullptr, [&] {
+            return matjson::makeObject({{"group", group}, {"activate", activate}, {"remap_keys", axiom::remap(&keys)},
+                {"trigger_id", triggerID}, {"control_id", controlID}});
+        });
+        GJBaseGameLayer::toggleGroupTriggered(group, activate, keys, triggerID, controlID);
+    }
+    void spawnGroup(int group, bool ordered, double delay, gd::vector<int> const& keys, int triggerID, int controlID) {
+        axiom::MechanicPair observation(this, "GJBaseGameLayer::spawnGroup", 0, nullptr, [&] {
+            return matjson::makeObject({{"group", group}, {"ordered", ordered}, {"delay", axiom::checked(delay)},
+                {"remap_keys", axiom::remap(&keys)}, {"trigger_id", triggerID}, {"control_id", controlID}});
+        });
+        GJBaseGameLayer::spawnGroup(group, ordered, delay, keys, triggerID, controlID);
     }
     void processCommands(float dt, bool isHalfTick, bool isLastTick) {
         axiom::CommandScope commandScope;
@@ -664,13 +925,22 @@ class $modify(AxiomBaseLayer, GJBaseGameLayer) {
             if (run->replay) {
                 while (!run->terminal && run->next < run->planned.size() && run->planned[run->next].command == run->command) {
                     auto event = run->planned[run->next++];
-                    run->injecting = true;
-                    // Enter through the native binding, so Geode establishes the
-                    // handleButton hook context before our one-shot permit is
-                    // consumed. Calling this->handleButton invokes the modified
-                    // wrapper directly; its base call then re-enters that hook.
-                    GJBaseGameLayer::handleButton(event.pressed, event.button, event.player == 1);
-                    run->injecting = false;
+                    if (run->driver == axiom::InputDriver::Owned) {
+                        run->injecting = true;
+                        // Enter the native binding to establish Geode's hook
+                        // context before the one-shot permit is consumed.
+                        GJBaseGameLayer::handleButton(event.pressed, event.button, event.player == 1);
+                        run->injecting = false;
+                    } else {
+                        auto ui = m_uiLayer;
+                        if (!ui || ui->m_gameLayer != this || !ui->m_initialized)
+                            throw std::runtime_error("Active native UILayer unavailable");
+                        auto timestamp = axiom::checked(m_timestamp);
+                        // This scheduled in-engine callback leaves the native
+                        // queued-button path intact. It is not OS input.
+                        if (event.pressed) ui->UILayer::keyDown(enumKeyCodes::KEY_Space, timestamp);
+                        else ui->UILayer::keyUp(enumKeyCodes::KEY_Space, timestamp);
+                    }
                 }
             }
         } catch (std::exception const& error) { axiom::fail(error.what()); }
@@ -709,6 +979,35 @@ class $modify(AxiomScheduler, CCScheduler) {
     }
 };
 class $modify(AxiomPlayer, PlayerObject) {
+    bool collidedWithObject(float dt, GameObject* object, CCRect rect, bool skipCheck) {
+        auto run = axiom::active.get();
+        int actor = run ? run->actor(this) : 0;
+        axiom::MechanicPair observation(run ? run->layer : nullptr, "PlayerObject::collidedWithObject", actor, object, [=] {
+            return matjson::makeObject({{"dt_seconds", axiom::checked(dt)}, {"skip_check", skipCheck},
+                {"rect", matjson::makeObject({{"x", axiom::checked(rect.origin.x)},
+                    {"y", axiom::checked(rect.origin.y)}, {"width", axiom::checked(rect.size.width)},
+                    {"height", axiom::checked(rect.size.height)}})}});
+        }, actor && run->watched(object));
+        auto result = PlayerObject::collidedWithObject(dt, object, rect, skipCheck);
+        observation.close(result);
+        return result;
+    }
+    void collidedWithSlopeInternal(float dt, GameObject* object, bool forced) {
+        auto run = axiom::active.get();
+        int actor = run ? run->actor(this) : 0;
+        axiom::MechanicPair observation(run ? run->layer : nullptr, "PlayerObject::collidedWithSlopeInternal", actor, object, [=] {
+            return matjson::makeObject({{"dt_seconds", axiom::checked(dt)}, {"forced", forced}});
+        }, actor && run->watched(object));
+        PlayerObject::collidedWithSlopeInternal(dt, object, forced);
+    }
+    void updateCollide(PlayerCollisionDirection direction, GameObject* object) {
+        auto run = axiom::active.get();
+        int actor = run ? run->actor(this) : 0;
+        axiom::MechanicPair observation(run ? run->layer : nullptr, "PlayerObject::updateCollide", actor, object, [=] {
+            return matjson::makeObject({{"direction", static_cast<int>(direction)}});
+        }, actor && run->watched(object));
+        PlayerObject::updateCollide(direction, object);
+    }
     bool pushButton(PlayerButton button) {
         auto result = PlayerObject::pushButton(button);
         record(button, true, "push", result);
@@ -728,9 +1027,34 @@ class $modify(AxiomPlayer, PlayerObject) {
         catch (std::exception const& error) { axiom::fail(error.what()); }
     }
 };
+class $modify(AxiomUiLayer, UILayer) {
+    void keyDown(enumKeyCodes key, double timestamp) {
+        axiom::DeliveryPair observation(m_gameLayer, "UILayer::keyDown", [=] {
+            return matjson::makeObject({{"key_code", static_cast<int>(key)}, {"timestamp", axiom::checked(timestamp)}});
+        });
+        UILayer::keyDown(key, timestamp);
+    }
+    void keyUp(enumKeyCodes key, double timestamp) {
+        axiom::DeliveryPair observation(m_gameLayer, "UILayer::keyUp", [=] {
+            return matjson::makeObject({{"key_code", static_cast<int>(key)}, {"timestamp", axiom::checked(timestamp)}});
+        });
+        UILayer::keyUp(key, timestamp);
+    }
+};
+class $modify(AxiomEffectObject, EffectGameObject) {
+    void triggerObject(GJBaseGameLayer* layer, int uniqueID, gd::vector<int> const* keys) {
+        axiom::MechanicPair observation(layer, "EffectGameObject::triggerObject", 0, this, [&] {
+            return matjson::makeObject({{"unique_id", uniqueID}, {"remap_keys", axiom::remap(keys)}});
+        });
+        EffectGameObject::triggerObject(layer, uniqueID, keys);
+    }
+};
 $on_mod(Loaded) {
     try { axiom::selectClockPolicy(); }
     catch (std::exception const& error) { axiom::clockSelectionError = error.what(); }
     if (!axiom::clockSelectionError.empty()) log::error("AXIOM clock experiment refused: {}", axiom::clockSelectionError);
+    try { axiom::selectDelivery(); }
+    catch (std::exception const& error) { axiom::deliverySelectionError = error.what(); }
+    if (!axiom::deliverySelectionError.empty()) log::error("AXIOM delivery/watch experiment refused: {}", axiom::deliverySelectionError);
     log::info("AXIOM M1 adapter loaded; local capture/replay disabled by default; selected-state only; SDK {} bindings {}", AXIOM_SDK_COMMIT, AXIOM_BINDINGS_COMMIT);
 }
