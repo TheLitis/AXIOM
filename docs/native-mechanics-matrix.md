@@ -4,11 +4,75 @@
 
 This study extends the selected native observations to gravity polarity, vehicle size, player speed and active dual state. Its [public catalogue](../examples/native/mechanics-matrix.json) declares 11 short, generated cube fixtures, exact raw-state sequences and responses to owned input plans. A fixture specification remains generated synthetic data; executed captures and their inspections are separate evidence.
 
-## Confirmatory result — PENDING
+## Confirmatory result
 
-Confirmation is in progress; the final verdict is pending. No confirmatory pass, final capture count, manifest digest or repeat verdict is claimed in this draft. The planned design is **56 captures, 33 repeated active replays and 12 response contrasts**: ten cases have one observation baseline, three active replays and one owned control; `dual-independent` has two controls and six captures. Every declared run requires completion. A separate schema-3 qualification of historical `cube-flat` and `ship-portal` is also pending; its ten planned completions will remain a separate ledger.
+**All 11 declared cases passed their selected-observation, full-repeat and owned-input response gates under `fixed-scheduler-240`.** The series contains 56 unique complete schema-3 captures and 11 distinct level payloads. Every attempt completed its level; there were no deaths or capture-integrity errors. M1, complete-state determinism, ordinary-input equivalence and calibrated human AR remain open.
 
-The catalogue and readers were frozen at `0b11bbdf47f53e26f2be8ef3b9a63090c877f7e1`; the confirming runner starts from evaluator revision `8f4691049270f1f8198972ffa3474d918913eb93`. The final identity will be checked against the executed manifest. The collector was compiled from `63d2524c9bdb0e24a8648ad11451eebdeeb88d1f`, with native source-tree digest `44c74f71b8064cddb98ede63c9414fa1016ebfee8cf685d87b46d73b4ae8d4ca`. Those are different component identities. The proposed package SHA-256 is `bc535ba1719ac89ac3fb7c3d1936413356453435e6c4d0d054e934b3a65753fc`; final measured identities and hashes will be checked against retained artifacts before publication.
+The confirming runner returned exit code 0 and recorded `declared_matrix_recorded_subset_passed` at **2026-10-10 21:29:47 UTC / 2026-10-11 00:29:47 MSK**. The retained result is `reports/native/mechanics-final-confirmed-d89aed9edea9486c8e810b7ebb0ca63b/matrix-result.json`. Its 56 attempts comprise 11 observation baselines, 33 active replay attempts and 12 owned controls. Ten cases have five attempts each; `dual-independent` has six. All 56 records report `recording_complete: true`, `dropped_records: 0` and `errors: []`, and all fixture inspections matched their exact mode/mechanics requirements and native callback plans.
+
+The 33 active replay attempts form **11 comparison reports**, each containing the first replay and two further repetitions: 22 first-replay-relative comparison rows. All 14 components in every report are true. All **12 response contrasts** passed, including an independently controlled active-P2 contrast. The measured first qualifying response command and terminal command are:
+
+| Case | Completed attempts | Terminal command in every attempt | First qualifying response command | Full-repeat components |
+|---|---:|---:|---|---|
+| `cube-reference` | 5 | 734 | P1 60 | 14/14 |
+| `gravity-inverted` | 5 | 734 | P1 200 | 14/14 |
+| `gravity-cycle` | 5 | 734 | P1 200 | 14/14 |
+| `size-mini-cycle` | 5 | 734 | P1 130 | 14/14 |
+| `speed-normal-cycle` | 5 | 798 | P1 200 | 14/14 |
+| `size-mini-speed-fast` | 5 | 698 | P1 190 | 14/14 |
+| `dual-independent` | 6 | 734 | P1 130; P2 200 | 14/14 |
+| `speed-slow-cycle` | 5 | 790 | P1 130 | 14/14 |
+| `speed-fast-cycle` | 5 | 688 | P1 130 | 14/14 |
+| `speed-faster-cycle` | 5 | 653 | P1 130 | 14/14 |
+| `speed-fastest-cycle` | 5 | 622 | P1 130 | 14/14 |
+
+Each response passed with its declared raw predicates true in **both** pre-ending samples. For gravity these include `gravity_inverted: true`; for the combined case they include mini size and fast speed together; both dual responses include `dual_active: true`. This establishes selected responses in those contexts, not complete input-channel semantics or equality of hidden engine state.
+
+## Measured identities and preservation
+
+All 56 captures share the same recorded environment and collector identity: Windows x64, GD 2.2081, Geode 5.8.2 and AXIOM collector 0.1.0, with only AXIOM and the loader in the recorded mod inventory. The effective policy is `fixed-scheduler-240`, the input policy is `process-commands-pre-hook-owned-input-v1`, and the manifest declares `system_and_display_required_during_matrix`. Configuration completeness is false, hardware-input arrival is unknown and render cadence is not captured.
+
+| Identity/artifact | Recorded value |
+|---|---|
+| Main result manifest SHA-256 | `ea0e38a1a3d5529a1c8d4202f43fd15e005f73fa851e34ca9732c3373bbca01a` |
+| Original mechanics catalogue SHA-256 | `e59a1f5ef5cc3084e0d615c0348fc7bfa649ada171d2572e0e3ee1736a40af61` |
+| Serialized validated catalogue SHA-256 | `6510d78110bd1cb7cbce17552d70163af6234483b20293b7b796858b7278c535` |
+| Evaluator source commit at series start | `8f4691049270f1f8198972ffa3474d918913eb93` |
+| Compiled collector source commit | `63d2524c9bdb0e24a8648ad11451eebdeeb88d1f` |
+| Native source-tree SHA-256 | `44c74f71b8064cddb98ede63c9414fa1016ebfee8cf685d87b46d73b4ae8d4ca` |
+| Executed Geode package SHA-256 | `bc535ba1719ac89ac3fb7c3d1936413356453435e6c4d0d054e934b3a65753fc` |
+| Loaded collector DLL SHA-256 | `16c410072df83ec02791b62279347a8eb79c47dbabae2cf16cd64ba942841708` |
+| Capture environment SHA-256 | `5afb8f9fe5e058cf263350920ead4b05e787ff0c6c56a7d14f6dbdd1b8367fad` |
+| GD executable SHA-256 | `fc5a16c292278bc2e8e078fb1d5023c2bd658322dd72712767ea70c2dd9ec6d0` |
+| Geode loader DLL SHA-256 | `61847e05d4aa416bfd4d1f4e026b5b0e66848756473b285add6233a5cc9356d2` |
+| SDK commit | `2a5fd87433da47d6bf07221774f0cbb25535ae08` |
+| Bindings commit | `2a8b5c489ce8b49e7061b0543aa2bc5b22570063` |
+| Four-file preservation audit SHA-256 | `00539e488fa41b8e6e274be4d3e7c0b6d697d9596890775e130e357748d85397` |
+
+The catalogue/readers were frozen at `0b11bbdf47f53e26f2be8ef3b9a63090c877f7e1`; later harness fixes supplied the evaluator revision above. Evaluator and compiled collector commits identify different components. Original and validated catalogue digests identify different serialized byte sequences. The manifest also preserves all 56 capture digests and 11 comparison-report digests.
+
+Its four evaluator file SHA-256 values are [fixtures.py](../src/axiom/fixtures.py): `394178b001b508402966816f87c8aed6855b0e4f5bffad0978b39e3c9e2dde73`; [native.py](../src/axiom/native.py): `48eec74ee9a2ab15d0c31cdcb1e51ad8241a91287532610c3afb876d559dc090`; [cli.py](../src/axiom/cli.py): `186ce72d2968a39c9f1f734d67c2698c88bf56624ac4e8cf0ae9d3d7213fee0d`; [run-native-matrix.ps1](../scripts/run-native-matrix.ps1): `79cd1600136ef496aa9be1a0bc0fb4cc119932941d5e2287bea71e4d6224af70`.
+
+The before/after preservation ledger and `preservation-audit.json` confirm exact byte and existence restoration of the isolated fixture, replay, AXIOM settings and loader settings. A separate same-host audit recomputed the CLI inspections/comparisons/responses and passed **12,371 artifact assertions**. Those assertions check supplied artifacts; they are not unit tests or external engine authentication. Separate local software validation passed 488 tests and 83 subtests, plus Ruff checks.
+
+| Retained audit artifact | SHA-256 |
+|---|---|
+| `reports/audit-schema3-mechanics-result.json` | `c32ef6024aa5ccb7bae0c294280929f96e96ced1ba0d72825d8e760bad4c8fb3` |
+| `reports/audit-schema3-legacy-result.json` | `ef7b4f18fd316c1a59d60b826c4a7c4beb9ab2a319faf934979d3921ebac2179` |
+| `reports/audit-schema3-checkpoint.py` | `b41cb7dfafaf979b984418f6ddff1d879987bb2e5888798e22ab942fafab66ee` |
+| `reports/audit-schema3-corrections.md` | `8b31491af44b3a3246c1ddf2eb61242daeddec9447d0588c8813a9ed3fd0ac0c` |
+
+The audit retains its corrections. An initial auditor assumed canonical JSON for replay hashes; the native collector hashes the exact source-plan bytes. After correcting the audit to hash retained `.plan.json` bytes, all 45 owned replay/control captures matched their source plans; no capture, retained result or implementation changed. Development probes retain only aggregate preservation assertions, whereas confirming series require four individually named records.
+
+The audit also checked the current helpers against Git contents at each recorded evaluator commit: `scripts/native-experiment-state.ps1` SHA-256 `3d2545a48491749dfb00710dc9e9bed32f4d07418ad94cfc9321974d3d6adaee` and `scripts/prepare-native-sandbox.ps1` SHA-256 `1d8e62fc9b67bb7481843daa95ce684e8665348c8286f705595b35a0fca4c856`. These are post-run Git-context checks. Their hashes are absent from the capture-time `analysis_file_sha256` manifest and cannot be described as capture-time helper hashes.
+
+## Separate historical-case qualification
+
+The same schema-3 collector was also checked against the historical schema-1 catalogue for **`cube-flat` and `ship-portal` only**. This separate series returned exit code 0 and `declared_matrix_recorded_subset_passed` at **2026-10-10 21:31:18 UTC / 2026-10-11 00:31:18 MSK**, under `reports/native/schema3-legacy-qualification-0ffdc43774044041bc0156329272a3bf/`. All ten unique captures completed at command 734 with complete recording, no drops and no errors. Six replay attempts form two comparison reports and four first-replay-relative rows; both reports passed all 14 components. Both responses passed, first at cube command 60 and ship command 131. All four experiment files were preserved.
+
+The result manifest SHA-256 is `08ba393d204ef9003a9e79c36afcf1ed351e55260e416ea41741920e7c800b34`; original and validated catalogue SHA-256 are both `d4c96260710ec9dc6a23ab7c7ee59ab04dc3077cc7e9b66d20987ac45e697fc5`. The recorded evaluator commit is **`c01a4ea69dd2fa65522dc00badfed91e737149b4`**, after the documentation commit, and its four analysis-file digests match the main series. Collector/package/DLL/tree/environment identities and the preservation-audit digest are the same as above. The mode-only historical requirements do not declare the new mechanics predicates. This compatibility qualification does not rerun all historical cases and is not pooled with either the 56-capture mechanics series or the [historical 55-capture result](native-fixture-matrix.md).
+
+Its separate same-host audit passed **1,961 artifact assertions**, reproduced both comparisons and responses, and checked all ten unique complete captures. The audit report digest is listed above; this remains artifact recomputation, not external engine authentication.
 
 ## Recorded fields and exact values
 
@@ -98,7 +162,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-native.ps1 -
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-native-matrix.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -MatrixPath .\examples\native\mechanics-matrix.json -Repetitions 3 -ClockPolicy fixed-scheduler-240
 ```
 
-`fixed-scheduler-240` forwards float32 `1/240` to actual Scheduler callbacks throughout the guarded isolated process. It is an explicit clock intervention, not evidence of 240 wall Hz or ordinary-input equivalence. `native` and `fixed-base-60` experiments belong to separate clock domains. Use `-CaseId dual-independent` for a subset or `-OutputDirectory` for a new evidence directory. Existing output directories are preserved and rejected; repetitions are bounded to 2–16, and an existing sandbox prevents concurrent execution.
+`fixed-scheduler-240` forwards float32 `1/240` to actual Scheduler callbacks throughout the guarded isolated process. It is an explicit clock intervention, not evidence of 240 wall Hz or ordinary-input equivalence. `native` and `fixed-base-60` experiments belong to separate clock domains. Use `-CaseId dual-independent` for a subset or `-OutputDirectory` for a new evidence directory. Existing output directories are preserved and rejected; repetitions are bounded to 2–16, and an active sandbox process prevents concurrent execution.
 
 The runner records original/validated catalogue digests, evaluator commit and four analysis-file digests, actual collector/environment identity, capture and comparison digests, mechanics availability/sequences, all verdicts and response predicates/first differences. It snapshots and restores bytes and existence of the isolated fixture, replay, AXIOM settings and loader settings, launches hidden, and terminates only its owned process. This is preservation of four experiment files, not a complete personal-save ledger. Raw captures, game binaries/assets and saves stay outside Git. The same-host evidence audit checks retained artifacts; it does not establish independent external replication.
 
