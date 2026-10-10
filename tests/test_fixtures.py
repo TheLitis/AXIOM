@@ -43,6 +43,41 @@ def capture(*, replay=True, plan=True):
     return result
 
 
+def matrix_v2():
+    result = matrix()
+    result["schema_version"] = 2
+    for run in result["cases"][0]["runs"]:
+        run["required_mechanics_sequences"] = {
+            "player1": {"gravity_inverted": [False], "vehicle_size": [1.0], "player_speed": [0.9]},
+            "player2": None,
+            "dual_active": [False],
+        }
+    for check in result["cases"][0]["response_checks"]:
+        check["required_mechanics"] = {
+            "gravity_inverted": None,
+            "vehicle_size": 1.0,
+            "player_speed": None,
+            "dual_active": False,
+        }
+    return result
+
+
+def capture_v3(*, replay=True, plan=True):
+    # Constructed schema values, not empirical physical calibration.
+    result = capture(replay=replay, plan=plan)
+    result["schema_version"] = 3
+    result["state_fields"] += ["gravity_inverted", "vehicle_size", "player_speed"]
+    result["layer_state_fields"] = ["dual_active"]
+    states = [row["state"] for row in result["attempt"]["trace"]]
+    states.append(result["attempt"]["terminal"]["state"])
+    for state in states:
+        state["dual_active"] = False
+        for player in ("player1", "player2"):
+            if state[player] is not None:
+                state[player].update(gravity_inverted=False, vehicle_size=1.0, player_speed=0.9)
+    return result
+
+
 def save(path, data):
     path.write_text(json.dumps(data, ensure_ascii=True), encoding="utf-8")
     return path
@@ -120,7 +155,7 @@ def test_portal_specs_require_actual_mode_and_do_not_invent_return_transition(mo
     assert get_fixture_case(result, mode + "-portal")["response_checks"][0]["mode"] == mode
 
 
-@pytest.mark.parametrize("version", [True, 1.0, 2, "1"])
+@pytest.mark.parametrize("version", [True, 1.0, 3, "1"])
 def test_version_is_strict_integer(version):
     data = matrix()
     data["schema_version"] = version
@@ -412,3 +447,304 @@ def test_response_does_not_ignore_fixture_requirement_failures(tmp_path):
     assert result["checks"]["selected_response_differs"]
     assert not result["checks"]["changed_requirements_match"]
     assert result["status"] == "selected_response_not_established"
+
+
+def test_v2_inspector_requires_selected_raw_schema3_fields(tmp_path):
+    result = inspect(tmp_path, spec=matrix_v2(), evidence=capture_v3())
+    assert result["schema_version"] == 2
+    assert result["status"] == "fixture_observations_match"
+    assert result["checks"]["native_mechanics_available"]
+    assert result["observed_mechanics_sequences"]["player1"] == {
+        "gravity_inverted": [False],
+        "vehicle_size": [1.0],
+        "player_speed": [0.9],
+    }
+    assert result["observed_mechanics_sequences"]["dual_active"] == [False]
+    assert result["mechanics_availability"]["player2_active_samples"] == 0
+    assert result["mechanics_checks"]["player2"] is None
+
+
+@pytest.mark.parametrize("legacy", [1, 2])
+def test_legacy_captures_cannot_supply_missing_raw_mechanics(tmp_path, legacy):
+    evidence = (
+        capture()
+        if legacy == 2
+        else json.loads((ROOT / "examples/native/synthetic-capture-a.json").read_text())
+    )
+    evidence["challenge"]["level_sha256"] = matrix()["cases"][0]["level_sha256"]
+    result = inspect(tmp_path, spec=matrix_v2(), evidence=evidence)
+    assert result["status"] == "fixture_observations_mismatch"
+    assert not result["checks"]["native_mechanics_available"]
+    assert not result["checks"]["required_mechanics_observed"]
+    assert result["observed_mechanics_sequences"]["player1"]["vehicle_size"] is None
+    assert not result["mechanics_availability"]["player1"]["vehicle_size"]
+
+
+def test_v1_output_fieldsets_are_preserved_for_schema3_observations(tmp_path):
+    expected = inspect(tmp_path)
+    result = inspect(tmp_path, evidence=capture_v3())
+    assert result.keys() == expected.keys()
+    assert result["schema_version"] == 1
+    assert result["status"] == "fixture_observations_match"
+    changed = capture_v3()
+    changed["attempt"]["trace"][1]["state"]["player1"]["y"] += 1
+    result = response(tmp_path, reference=capture_v3(plan=False), changed=changed)
+    assert result.keys() == response(tmp_path).keys()
+    assert result["schema_version"] == 1
+    assert result["status"] == "selected_response_observed"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("gravity_inverted", [0]),
+        ("gravity_inverted", [False, 0]),
+        ("gravity_inverted", [False, False]),
+        ("gravity_inverted", []),
+        ("vehicle_size", [True]),
+        ("vehicle_size", [1, 1.0]),
+        ("vehicle_size", [float("nan")]),
+        ("vehicle_size", [float("inf")]),
+        ("vehicle_size", [2**2000]),
+        ("player_speed", ["0.9"]),
+        ("player_speed", [0.9, 0.9]),
+        ("player_speed", [1] * 65),
+    ],
+)
+def test_v2_sequence_types_limits_and_nonfinite_values_are_strict(field, value):
+    data = matrix_v2()
+    data["cases"][0]["runs"][1]["required_mechanics_sequences"]["player1"][field] = value
+    with pytest.raises(ValueError):
+        validate_fixture_matrix(data)
+
+
+def test_v2_runs_cannot_be_all_null_or_add_undeclared_mechanics():
+    data = matrix_v2()
+    requirement = data["cases"][0]["runs"][1]["required_mechanics_sequences"]
+    requirement["player1"] = {field: None for field in requirement["player1"]}
+    requirement["dual_active"] = None
+    with pytest.raises(ValueError, match="at least one non-null"):
+        validate_fixture_matrix(data)
+    requirement["dual_active"] = [False]
+    assert validate_fixture_matrix(data)
+    requirement["player1"]["inferred_mini"] = [False]
+    with pytest.raises(ValueError, match="requires exactly"):
+        validate_fixture_matrix(data)
+
+
+def test_raw_numeric_constraints_have_no_invented_physical_ranges():
+    data = matrix_v2()
+    data["cases"][0]["runs"][1]["required_mechanics_sequences"]["player1"]["vehicle_size"] = [-1.0]
+    data["cases"][0]["response_checks"][0]["required_mechanics"]["player_speed"] = -2.0
+    assert validate_fixture_matrix(data)
+
+
+def test_raw_mechanics_are_exact_and_compressed_before_ending(tmp_path):
+    spec, evidence = matrix_v2(), capture_v3()
+    spec["cases"][0]["runs"][1]["required_mechanics_sequences"]["player1"]["gravity_inverted"] = [False, True]
+    evidence["attempt"]["trace"][1]["state"]["player1"]["gravity_inverted"] = True
+    evidence["attempt"]["trace"][2]["state"]["player1"].update(gravity_inverted=False, vehicle_size=0.5)
+    evidence["attempt"]["terminal"]["state"]["player1"]["vehicle_size"] = 0.5
+    result = inspect(tmp_path, spec=spec, evidence=evidence)
+    assert result["status"] == "fixture_observations_match"
+    assert result["observed_mechanics_sequences"]["player1"]["gravity_inverted"] == [False, True]
+    assert result["observed_mechanics_sequences"]["player1"]["vehicle_size"] == [1.0]
+    spec["cases"][0]["runs"][1]["required_mechanics_sequences"]["player1"]["vehicle_size"] = [1.0000000001]
+    result = inspect(tmp_path, spec=spec, evidence=evidence)
+    assert not result["mechanics_checks"]["player1"]["vehicle_size"]
+    assert result["status"] == "fixture_observations_mismatch"
+
+
+def dual_spec():
+    spec = matrix_v2()
+    run = spec["cases"][0]["runs"][1]
+    run["required_mode_sequences"]["player2"] = ["cube"]
+    run["required_mechanics_sequences"]["player2"] = {
+        "gravity_inverted": [False],
+        "vehicle_size": [0.5],
+        "player_speed": [0.9],
+    }
+    run["required_mechanics_sequences"]["dual_active"] = [False, True]
+    return spec
+
+
+def test_inactive_player2_pointer_does_not_prove_dual_mechanics(tmp_path):
+    evidence = capture_v3()
+    for row in evidence["attempt"]["trace"]:
+        row["state"]["player2"] = deepcopy(row["state"]["player1"])
+        row["state"]["player2"]["vehicle_size"] = 0.5
+    result = inspect(tmp_path, spec=dual_spec(), evidence=evidence)
+    assert result["status"] == "fixture_observations_mismatch"
+    assert result["observed_mode_sequences"]["player2"] == []
+    assert result["observed_mechanics_sequences"]["player2"]["vehicle_size"] == []
+    assert not result["mechanics_checks"]["player2_active_samples_observed"]
+    evidence["attempt"]["trace"][1]["state"]["dual_active"] = True
+    result = inspect(tmp_path, spec=dual_spec(), evidence=evidence)
+    assert result["status"] == "fixture_observations_match"
+    assert result["observed_mechanics_sequences"]["player2"]["vehicle_size"] == [0.5]
+    assert result["observed_mode_sequences"]["player2"] == ["cube"]
+
+
+def test_active_dual_flag_without_player2_state_cannot_satisfy_requirements(tmp_path):
+    evidence = capture_v3()
+    evidence["attempt"]["trace"][1]["state"]["dual_active"] = True
+    result = inspect(tmp_path, spec=dual_spec(), evidence=evidence)
+    assert not result["mechanics_checks"]["player2_active_samples_observed"]
+    assert not result["mechanics_availability"]["player2"]["vehicle_size"]
+    assert result["observed_mechanics_sequences"]["player2"]["vehicle_size"] == [None]
+
+
+def test_null_player2_scope_claims_none_and_empty_scope_needs_mode_requirement():
+    spec = matrix_v2()
+    run = spec["cases"][0]["runs"][1]
+    run["required_mechanics_sequences"]["player2"] = {
+        "gravity_inverted": None,
+        "vehicle_size": None,
+        "player_speed": None,
+    }
+    with pytest.raises(ValueError, match="explicit player2 mode"):
+        validate_fixture_matrix(spec)
+    run["required_mode_sequences"]["player2"] = ["cube"]
+    assert validate_fixture_matrix(spec)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("dual_active", 0), ("gravity_inverted", 1), ("vehicle_size", True), ("player_speed", float("inf"))],
+)
+def test_response_predicates_preserve_raw_types(field, value):
+    spec = matrix_v2()
+    spec["cases"][0]["response_checks"][0]["required_mechanics"][field] = value
+    with pytest.raises(ValueError):
+        validate_fixture_matrix(spec)
+
+
+def test_response_predicates_required_and_player2_cannot_request_inactive_dual():
+    spec = matrix_v2()
+    check = spec["cases"][0]["response_checks"][0]
+    check["required_mechanics"] = {key: None for key in check["required_mechanics"]}
+    with pytest.raises(ValueError, match="at least one mechanics predicate"):
+        validate_fixture_matrix(spec)
+    check["required_mechanics"]["dual_active"] = False
+    check["player"] = 2
+    spec["cases"][0]["runs"][1]["inputs"][0]["player"] = 2
+    with pytest.raises(ValueError, match="dual_active=false"):
+        validate_fixture_matrix(spec)
+
+
+def test_motion_after_size_reverts_cannot_satisfy_target_parameter_response(tmp_path):
+    spec = matrix_v2()
+    spec["cases"][0]["response_checks"][0]["required_mechanics"]["vehicle_size"] = 0.5
+    changed = capture_v3()
+    changed["attempt"]["trace"][1]["state"]["player1"]["y"] += 1
+    result = response(tmp_path, spec=spec, reference=capture_v3(plan=False), changed=changed)
+    assert result["schema_version"] == 2
+    assert result["status"] == "selected_response_not_established"
+    assert result["shared_pre_ending_mode_samples"] == 1
+    assert result["shared_mechanics_predicate_samples"] == 0
+    assert result["first_difference"] is None
+
+
+def test_v2_response_conditions_must_hold_in_both_samples_and_are_auditable(tmp_path):
+    spec, reference, changed = matrix_v2(), capture_v3(plan=False), capture_v3()
+    check = spec["cases"][0]["response_checks"][0]
+    check["required_mechanics"]["vehicle_size"] = 0.5
+    for run in spec["cases"][0]["runs"]:
+        run["required_mechanics_sequences"]["player1"]["vehicle_size"] = [1.0, 0.5]
+    changed["attempt"]["trace"][1]["state"]["player1"].update(y=115, vehicle_size=0.5)
+    result = response(tmp_path, spec=spec, reference=reference, changed=changed)
+    assert result["shared_mechanics_predicate_samples"] == 0
+    reference["attempt"]["trace"][1]["state"]["player1"]["vehicle_size"] = 0.5
+    result = response(tmp_path, spec=spec, reference=reference, changed=changed)
+    assert result["status"] == "selected_response_observed"
+    assert result["first_difference"]["observed_mechanics"]["reference"]["vehicle_size"] == 0.5
+    assert result["first_difference"]["observed_mechanics"]["changed"]["dual_active"] is False
+    assert all(result["mechanics_predicate_availability"].values())
+
+
+def test_v2_response_cannot_invent_parameter_values_from_legacy_capture(tmp_path):
+    changed = capture()
+    changed["attempt"]["trace"][1]["state"]["player1"]["y"] += 1
+    result = response(tmp_path, spec=matrix_v2(), reference=capture(plan=False), changed=changed)
+    assert not result["checks"]["mechanics_predicates_available"]
+    assert result["shared_mechanics_predicate_samples"] == 0
+    assert result["status"] == "selected_response_not_established"
+
+
+@pytest.mark.parametrize("field", ["gravity_inverted", "vehicle_size", "player_speed", "dual_active"])
+def test_schema3_response_prefix_includes_all_new_actor_and_layer_fields(tmp_path, field):
+    reference, changed = capture_v3(plan=False), capture_v3()
+    # Change the replay event to index 2, leaving row 1 as an unchanged-plan prefix.
+    changed["attempt"]["planned_inputs"][0]["command_index"] = 2
+    for event in changed["attempt"]["inputs"]:
+        event["command_index"] = 2
+    spec = matrix_v2()
+    spec["cases"][0]["runs"][1]["inputs"][0]["command_index"] = 2
+    state = changed["attempt"]["trace"][1]["state"]
+    if field == "dual_active":
+        state[field] = True
+    else:
+        state["player1"][field] = True if field == "gravity_inverted" else 0.5
+    result = response(tmp_path, spec=spec, reference=reference, changed=changed)
+    assert not result["checks"]["same_selected_prefix_before_changed_input"]
+    assert result["status"] == "selected_response_not_established"
+
+
+def test_v2_player2_response_always_requires_dual_active_in_both_samples(tmp_path):
+    spec = matrix_v2()
+    spec["cases"][0]["runs"][1]["inputs"][0]["player"] = 2
+    check = spec["cases"][0]["response_checks"][0]
+    check["player"] = 2
+    check["required_mechanics"]["dual_active"] = None
+    reference, changed = capture_v3(plan=False), capture_v3()
+    changed["attempt"]["planned_inputs"][0]["player"] = 2
+    for event in changed["attempt"]["inputs"]:
+        event["player"] = 2
+    for evidence in (reference, changed):
+        states = [row["state"] for row in evidence["attempt"]["trace"]]
+        states.append(evidence["attempt"]["terminal"]["state"])
+        for state in states:
+            state["player2"] = deepcopy(state["player1"])
+    changed["attempt"]["trace"][1]["state"]["player2"]["y"] += 1
+    result = response(tmp_path, spec=spec, reference=reference, changed=changed)
+    assert result["checks"]["reference_requirements_match"]
+    assert result["checks"]["changed_requirements_match"]
+    assert result["shared_pre_ending_mode_samples"] == 1
+    assert result["shared_mechanics_predicate_samples"] == 0
+    assert result["status"] == "selected_response_not_established"
+    reference["attempt"]["trace"][1]["state"]["dual_active"] = True
+    changed["attempt"]["trace"][1]["state"]["dual_active"] = True
+    for run in spec["cases"][0]["runs"]:
+        run["required_mechanics_sequences"]["dual_active"] = [False, True]
+    result = response(tmp_path, spec=spec, reference=reference, changed=changed)
+    assert result["status"] == "selected_response_observed"
+    assert result["first_difference"]["observed_mechanics"]["reference"]["dual_active"] is True
+
+
+def test_v1_player2_mode_semantics_are_preserved_without_new_dual_claim(tmp_path):
+    spec, evidence = matrix(), capture_v3()
+    spec["cases"][0]["runs"][1]["required_mode_sequences"]["player2"] = ["cube"]
+    for row in evidence["attempt"]["trace"]:
+        row["state"]["player2"] = deepcopy(row["state"]["player1"])
+    result = inspect(tmp_path, spec=spec, evidence=evidence)
+    assert result["schema_version"] == 1
+    assert result["mode_checks"]["player2"]
+    assert "mechanics_availability" not in result
+    assert result["status"] == "fixture_observations_match"
+
+
+def test_versioned_mechanics_field_shapes_are_exact():
+    spec = matrix_v2()
+    del spec["cases"][0]["runs"][1]["required_mechanics_sequences"]
+    with pytest.raises(ValueError, match="requires exactly"):
+        validate_fixture_matrix(spec)
+    spec = matrix_v2()
+    del spec["cases"][0]["response_checks"][0]["required_mechanics"]
+    with pytest.raises(ValueError, match="requires exactly"):
+        validate_fixture_matrix(spec)
+    spec = matrix()
+    spec["cases"][0]["runs"][1]["required_mechanics_sequences"] = matrix_v2()["cases"][0]["runs"][1][
+        "required_mechanics_sequences"
+    ]
+    with pytest.raises(ValueError, match="requires exactly"):
+        validate_fixture_matrix(spec)

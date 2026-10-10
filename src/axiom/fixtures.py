@@ -12,13 +12,14 @@ from pathlib import Path
 
 from .ingest import parse_level_string
 from .native import MAX_PLANNED_INPUTS, MAX_TRACE_RECORDS, canonical_sha256, load_native_capture
-from .validation import mapping, read_json, sha256, string
+from .validation import finite, mapping, read_json, sha256, string
 
 MODES = frozenset({"cube", "ship", "ball", "ufo", "wave", "robot", "spider", "swing"})
 MAX_CASES = 64
 MAX_RUNS = 16
 MAX_LEVEL_BYTES = 64 * 1024
 _EVENT_FIELDS = frozenset({"command_index", "player", "button", "pressed"})
+_MECHANICS_FIELDS = ("gravity_inverted", "vehicle_size", "player_speed")
 
 
 def _fields(value: object, name: str, required: set[str] | frozenset[str]) -> dict:
@@ -81,11 +82,74 @@ def _mode_sequences(value: object, name: str) -> dict:
     return sequences
 
 
+def _raw_equal(left: object, right: object) -> bool:
+    # Python equates True with 1; a native boolean must not match a numeric field.
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    return left == right
+
+
+def _raw_sequence(value: object, name: str, boolean: bool) -> list | None:
+    if value is None:
+        return None
+    sequence = _array(value, name, 1, 64)
+    for item in sequence:
+        if boolean:
+            if type(item) is not bool:
+                raise ValueError(f"{name} must contain JSON booleans")
+        else:
+            finite(item, name)  # Raw finite values; no invented physical range.
+    if any(_raw_equal(left, right) for left, right in zip(sequence, sequence[1:])):
+        raise ValueError(f"{name} must omit adjacent duplicate values")
+    return sequence
+
+
+def _mechanics_sequences(value: object, modes: dict) -> dict:
+    sequences = _fields(value, "required_mechanics_sequences", {"player1", "player2", "dual_active"})
+    constraints = 0
+    for player in ("player1", "player2"):
+        declaration = sequences[player]
+        if player == "player2" and declaration is None:
+            continue
+        fields = _fields(declaration, f"required_mechanics_sequences.{player}", set(_MECHANICS_FIELDS))
+        count = 0
+        for field, sequence in fields.items():
+            _raw_sequence(
+                sequence, f"required_mechanics_sequences.{player}.{field}", field == "gravity_inverted"
+            )
+            count += sequence is not None
+        if player == "player2" and not count and modes["player2"] is None:
+            raise ValueError("An all-null player2 mechanics scope requires an explicit player2 mode sequence")
+        constraints += count
+    dual = _raw_sequence(sequences["dual_active"], "required_mechanics_sequences.dual_active", True)
+    constraints += dual is not None
+    if not constraints:
+        raise ValueError("Fixture matrix v2 requires at least one non-null mechanics sequence per run")
+    return sequences
+
+
+def _response_mechanics(value: object, player: int) -> dict:
+    predicates = _fields(value, "response_check.required_mechanics", set(_MECHANICS_FIELDS) | {"dual_active"})
+    for field, expected in predicates.items():
+        if expected is None:
+            continue
+        if field in {"gravity_inverted", "dual_active"}:
+            if type(expected) is not bool:
+                raise ValueError(f"response_check.required_mechanics.{field} must be a JSON boolean or null")
+        else:
+            finite(expected, f"response_check.required_mechanics.{field}")
+    if all(value is None for value in predicates.values()):
+        raise ValueError("Fixture matrix v2 response checks require at least one mechanics predicate")
+    if player == 2 and predicates["dual_active"] is False:
+        raise ValueError("Player2 response cannot require dual_active=false")
+    return predicates
+
+
 def validate_fixture_matrix(data: object) -> dict:
     """Validate a bounded, versioned catalogue; native verification stays separate."""
     matrix = _fields(data, "fixture matrix", {"schema_version", "kind", "provenance", "clock", "cases"})
-    if type(matrix["schema_version"]) is not int or matrix["schema_version"] != 1:
-        raise ValueError("Expected fixture matrix schema_version 1")
+    if type(matrix["schema_version"]) is not int or matrix["schema_version"] not in {1, 2}:
+        raise ValueError("Expected fixture matrix schema_version 1 or 2")
     if matrix["kind"] != "native_fixture_matrix" or matrix["clock"] != "processCommands_call_index":
         raise ValueError("Expected kind native_fixture_matrix and processCommands_call_index clock")
     provenance = _fields(matrix["provenance"], "provenance", {"origin", "native_verification"})
@@ -131,7 +195,8 @@ def validate_fixture_matrix(data: object) -> dict:
             _fields(
                 run,
                 "run",
-                {"id", "role", "input_mode", "inputs", "expected_outcome", "required_mode_sequences"},
+                {"id", "role", "input_mode", "inputs", "expected_outcome", "required_mode_sequences"}
+                | ({"required_mechanics_sequences"} if matrix["schema_version"] == 2 else set()),
             )
             run_id = _id(run["id"], "run.id")
             if run_id in run_map:
@@ -157,6 +222,8 @@ def validate_fixture_matrix(data: object) -> dict:
             }:
                 raise ValueError("Invalid fixture expected_outcome")
             _mode_sequences(run["required_mode_sequences"], "required_mode_sequences")
+            if matrix["schema_version"] == 2:
+                _mechanics_sequences(run["required_mechanics_sequences"], run["required_mode_sequences"])
         if sum(run["role"] == "baseline" for run in runs) != 1:
             raise ValueError("Each fixture requires exactly one observation baseline")
         if sum(run["role"] == "replay" for run in runs) != 1:
@@ -165,7 +232,10 @@ def validate_fixture_matrix(data: object) -> dict:
         check_ids = set()
         for check in checks:
             _fields(
-                check, "response check", {"id", "reference_run", "changed_run", "player", "fields", "mode"}
+                check,
+                "response check",
+                {"id", "reference_run", "changed_run", "player", "fields", "mode"}
+                | ({"required_mechanics"} if matrix["schema_version"] == 2 else set()),
             )
             check_id = _id(check["id"], "response_check.id")
             if check_id in check_ids:
@@ -178,6 +248,8 @@ def validate_fixture_matrix(data: object) -> dict:
                     raise ValueError("Response checks must name two owned replay runs in the fixture")
                 pair.append(run_map[run_id])
             player = _int(check["player"], "response_check.player", 1, 2)
+            if matrix["schema_version"] == 2:
+                _response_mechanics(check["required_mechanics"], player)
             if not isinstance(check["mode"], str) or check["mode"] not in MODES:
                 raise ValueError("Response check mode must name a supported observed mode")
             if pair[0]["inputs"] == pair[1]["inputs"]:
@@ -217,28 +289,110 @@ def get_fixture_run(matrix: dict, case_id: str, run_id: str) -> dict:
     raise ValueError(f"Unknown fixture run: {case_id}/{run_id}")
 
 
-def _observed_mode_sequences(capture: dict) -> dict[str, list[str | None]]:
-    result = {"player1": [], "player2": []}
-    if capture["schema_version"] != 2:
-        return result  # Schema 1 cannot distinguish gameplay from native ending.
-    states = [
-        row["state"]
+def _pre_end_rows(capture: dict) -> list[dict]:
+    if capture["schema_version"] not in {2, 3}:
+        return []
+    return [
+        row
         for row in capture["attempt"]["trace"]
         if not row["phase"]["level_end_animation_started"] and not row["phase"]["has_completed_level"]
     ]
-    for state in states:
+
+
+def _append_change(sequence: list, value: object) -> None:
+    if not sequence or not _raw_equal(sequence[-1], value):
+        sequence.append(value)
+
+
+def _observed_mode_sequences(capture: dict, *, active_player2: bool = False) -> dict[str, list[str | None]]:
+    result = {"player1": [], "player2": []}
+    for row in _pre_end_rows(capture):
+        state = row["state"]
         for player in result:
+            if player == "player2" and active_player2:
+                if capture["schema_version"] != 3 or not state["dual_active"]:
+                    continue
             mode = None if state[player] is None else state[player]["mode"]
-            if not result[player] or result[player][-1] != mode:
-                result[player].append(mode)
+            _append_change(result[player], mode)
     return result
+
+
+def _observed_mechanics_sequences(capture: dict) -> tuple[dict, dict]:
+    observed = {
+        "player1": {field: None for field in _MECHANICS_FIELDS},
+        "player2": {field: None for field in _MECHANICS_FIELDS},
+        "dual_active": None,
+    }
+    availability = {
+        "native_schema3_fields": capture["schema_version"] == 3,
+        "player1": {field: False for field in _MECHANICS_FIELDS},
+        "player2": {field: False for field in _MECHANICS_FIELDS},
+        "dual_active": False,
+        "player2_active_samples": 0,
+    }
+    if capture["schema_version"] != 3:
+        return observed, availability
+    observed["dual_active"] = []
+    for player in ("player1", "player2"):
+        observed[player] = {field: [] for field in _MECHANICS_FIELDS}
+    rows = _pre_end_rows(capture)
+    for row in rows:
+        state = row["state"]
+        _append_change(observed["dual_active"], state["dual_active"])
+        for player in ("player1", "player2"):
+            if player == "player2" and not state["dual_active"]:
+                continue
+            if player == "player2":
+                availability["player2_active_samples"] += 1
+            for field in _MECHANICS_FIELDS:
+                value = None if state[player] is None else state[player][field]
+                _append_change(observed[player][field], value)
+    availability["dual_active"] = bool(rows)
+    for player in ("player1", "player2"):
+        availability[player] = {
+            field: bool(observed[player][field]) and None not in observed[player][field]
+            for field in _MECHANICS_FIELDS
+        }
+    return observed, availability
+
+
+def _sequence_matches(observed: list | None, required: list | None) -> bool:
+    if required is None:
+        return True
+    return (
+        observed is not None
+        and len(observed) == len(required)
+        and all(_raw_equal(left, right) for left, right in zip(observed, required))
+    )
+
+
+def _mechanics_checks(required: dict, observed: dict, availability: dict, modes: dict) -> dict:
+    checks = {}
+    for player in ("player1", "player2"):
+        declaration = required[player]
+        checks[player] = (
+            None
+            if declaration is None
+            else {
+                field: _sequence_matches(observed[player][field], sequence)
+                and (sequence is None or availability[player][field])
+                for field, sequence in declaration.items()
+            }
+        )
+    checks["dual_active"] = _sequence_matches(observed["dual_active"], required["dual_active"])
+    claims_player2 = required["player2"] is not None or modes["player2"] is not None
+    checks["player2_active_samples_observed"] = not claims_player2 or (
+        availability["player2_active_samples"] > 0 and all(availability["player2"].values())
+    )
+    return checks
 
 
 def _evaluate_capture(matrix: dict, case_id: str, run_id: str, capture: dict) -> dict:
     run = get_fixture_run(matrix, case_id, run_id)
     attempt = capture["attempt"]
     source = "unknown" if run["input_mode"] == "observation" else "replay"
-    observed_modes = _observed_mode_sequences(capture)
+    mechanics_required = matrix["schema_version"] == 2
+    observed_modes = _observed_mode_sequences(capture, active_player2=mechanics_required)
     mode_checks = {
         player: required is None or observed_modes[player] == required
         for player, required in run["required_mode_sequences"].items()
@@ -262,14 +416,14 @@ def _evaluate_capture(matrix: dict, case_id: str, run_id: str, capture: dict) ->
             event["command_index"] <= attempt["terminal"]["command_index"] for event in run["inputs"]
         ),
         "native_callbacks_observed": not missing_callbacks,
-        "native_phase_boundary_available": capture["schema_version"] == 2,
+        "native_phase_boundary_available": capture["schema_version"] in {2, 3},
         "terminal_outcome_matches": attempt["terminal"]["outcome"] in {"completed", "died"}
         if run["expected_outcome"] == "any_terminal"
         else attempt["terminal"]["outcome"] == run["expected_outcome"],
         "required_modes_observed": all(mode_checks.values()),
     }
-    return {
-        "schema_version": 1,
+    result = {
+        "schema_version": matrix["schema_version"],
         "kind": "native_fixture_inspection",
         "status": "fixture_observations_match" if all(checks.values()) else "fixture_observations_mismatch",
         "case_id": case_id,
@@ -279,7 +433,7 @@ def _evaluate_capture(matrix: dict, case_id: str, run_id: str, capture: dict) ->
         "checks": checks,
         "observed_mode_sequences": observed_modes,
         "mode_observation_scope": "before_native_end_animation"
-        if capture["schema_version"] == 2
+        if capture["schema_version"] in {2, 3}
         else "unavailable_schema1",
         "mode_checks": mode_checks,
         "missing_native_callbacks": missing_callbacks,
@@ -290,10 +444,34 @@ def _evaluate_capture(matrix: dict, case_id: str, run_id: str, capture: dict) ->
             "Supplied capture observations do not authenticate native execution or establish complete engine state.",
             "Encoded mechanics intent and editor coordinates are not proof that a mechanic activated.",
             "Mode requirements check selected labels, not gravity, size, speed, collision geometry or dual activity.",
-            "Mode coverage uses schema-2 pre-ending trace samples only; terminal and ending animation samples are excluded.",
+            "Mode coverage uses schema-2/3 pre-ending trace samples only; terminal and ending animation samples are excluded.",
             "No human difficulty, physical impossibility, continuous timing window or Axiom Rating is inferred.",
         ],
     }
+    if mechanics_required:
+        observed, availability = _observed_mechanics_sequences(capture)
+        mechanic_checks = _mechanics_checks(
+            run["required_mechanics_sequences"], observed, availability, run["required_mode_sequences"]
+        )
+        checks["native_mechanics_available"] = availability["native_schema3_fields"]
+        checks["required_mechanics_observed"] = all(
+            all(value.values()) if isinstance(value, dict) else value is None or value
+            for value in mechanic_checks.values()
+        )
+        result["status"] = (
+            "fixture_observations_match" if all(checks.values()) else "fixture_observations_mismatch"
+        )
+        result.update(
+            observed_mechanics_sequences=observed,
+            mechanics_availability=availability,
+            mechanics_checks=mechanic_checks,
+            mechanics_observation_scope="schema3_pre_ending_player2_dual_active_only",
+        )
+        result["limitations"] += [
+            "Mechanics sequences use selected raw schema-3 fields, not inferred portal effects or physical calibration.",
+            "Player-2 mode/mechanics samples require recorded dual_active=true; pointer existence proves no dual activity.",
+        ]
+    return result
 
 
 def inspect_fixture_capture(
@@ -332,14 +510,20 @@ def compare_fixture_response(
     first_changed_input = min((event["command_index"] for event in remaining), default=None)
     first_difference = None
     shared_rows = 0
+    shared_mode_rows = 0
+    predicates_required = matrix["schema_version"] == 2
+    mechanics_available = reference["schema_version"] == 3 and changed["schema_version"] == 3
     selected_prefix_matches = True
     for left, right in zip(reference["attempt"]["trace"], changed["attempt"]["trace"]):
         lhs, rhs = left["state"][player], right["state"][player]
-        if first_changed_input is not None and left["command_index"] < first_changed_input and lhs != rhs:
-            selected_prefix_matches = False
+        if first_changed_input is not None and left["command_index"] < first_changed_input:
+            if lhs != rhs or (
+                mechanics_available and left["state"]["dual_active"] != right["state"]["dual_active"]
+            ):
+                selected_prefix_matches = False
         if lhs is None or rhs is None:
             continue
-        if reference["schema_version"] != 2 or changed["schema_version"] != 2:
+        if reference["schema_version"] not in {2, 3} or changed["schema_version"] not in {2, 3}:
             continue
         if any(
             row["phase"]["level_end_animation_started"] or row["phase"]["has_completed_level"]
@@ -350,6 +534,25 @@ def compare_fixture_response(
             continue
         if first_changed_input is None or left["command_index"] < first_changed_input:
             continue
+        shared_mode_rows += 1
+        if predicates_required:
+            if not mechanics_available:
+                continue
+            if check["player"] == 2 and not (left["state"]["dual_active"] and right["state"]["dual_active"]):
+                continue
+            actual_mechanics = {
+                label: {
+                    **{field: actor[field] for field in _MECHANICS_FIELDS},
+                    "dual_active": row["state"]["dual_active"],
+                }
+                for label, actor, row in (("reference", lhs, left), ("changed", rhs, right))
+            }
+            if any(
+                expected is not None and not _raw_equal(actual[field], expected)
+                for actual in actual_mechanics.values()
+                for field, expected in check["required_mechanics"].items()
+            ):
+                continue
         shared_rows += 1
         differences = {
             field: {"reference": lhs[field], "changed": rhs[field]}
@@ -358,6 +561,8 @@ def compare_fixture_response(
         }
         if differences and first_difference is None:
             first_difference = {"command_index": left["command_index"], "fields": differences}
+            if predicates_required:
+                first_difference["observed_mechanics"] = actual_mechanics
     checks = {
         "reference_requirements_match": inspections[0]["status"] == "fixture_observations_match",
         "changed_requirements_match": inspections[1]["status"] == "fixture_observations_match",
@@ -368,8 +573,11 @@ def compare_fixture_response(
         "input_plans_differ": first_changed_input is not None,
         "selected_response_differs": first_difference is not None,
     }
-    return {
-        "schema_version": 1,
+    if predicates_required:
+        checks["mechanics_predicates_available"] = mechanics_available
+        checks["shared_mechanics_predicate_samples_observed"] = shared_rows > 0
+    result = {
+        "schema_version": matrix["schema_version"],
         "kind": "native_fixture_response",
         "case_id": case_id,
         "check_id": check_id,
@@ -388,6 +596,21 @@ def compare_fixture_response(
             "Matching selected initial fields does not establish equality of complete engine state.",
             "A difference proves an observed response only in the declared fixture, environment and command-index clock.",
             "The required mode is sampled after processCommands; it does not establish mode at the input callback.",
-            "Response contrasts use schema-2 pre-ending samples in both captures; unknown or ending phases are excluded.",
+            "Response contrasts use schema-2/3 pre-ending samples in both captures; unknown or ending phases are excluded.",
         ],
     }
+    if predicates_required:
+        result.update(
+            required_mechanics=check["required_mechanics"],
+            mechanics_predicate_availability={
+                "reference_schema3": reference["schema_version"] == 3,
+                "changed_schema3": changed["schema_version"] == 3,
+            },
+            shared_pre_ending_mode_samples=shared_mode_rows,
+            shared_mechanics_predicate_samples=shared_rows,
+            mechanics_observation_scope="schema3_both_samples_match_all_declared_predicates",
+        )
+        result["limitations"].append(
+            "Player-2 response samples require dual_active=true in both captures, irrespective of nullable predicates."
+        )
+    return result
