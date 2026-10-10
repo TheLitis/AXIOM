@@ -59,6 +59,7 @@ function Invoke-MatrixCapture($Case, $Run, [int]$Index, [string]$Directory) {
     if ($Run.input_mode -eq 'replay') { $arguments += '--geode:axiom.native-capture.replay' }
     $process = Start-Process -FilePath $exe -WorkingDirectory $runtime -ArgumentList $arguments -WindowStyle Hidden -PassThru
     $timer = [Diagnostics.Stopwatch]::StartNew()
+    $captureFailure = $null
     try {
         $capture = $null
         while ($timer.Elapsed.TotalSeconds -lt 45) {
@@ -95,10 +96,18 @@ function Invoke-MatrixCapture($Case, $Run, [int]$Index, [string]$Directory) {
             Path = $destination; Data = $data; Inspection = $inspection
             Record = $record
         }
+    } catch {
+        $captureFailure = $_
+        throw
     } finally {
         if (-not $process.HasExited -and $process.Path -eq $exe) {
             Stop-Process -Id $process.Id
-            if (-not $process.WaitForExit(5000)) { throw 'Owned sandbox process did not exit.' }
+            if (-not $process.WaitForExit(5000)) {
+                if ($captureFailure) {
+                    throw "Capture failed: $($captureFailure.Exception.Message). Owned sandbox process did not exit within cleanup timeout."
+                }
+                throw 'Owned sandbox process did not exit within cleanup timeout.'
+            }
         }
     }
 }
