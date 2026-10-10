@@ -79,15 +79,21 @@ function Invoke-MatrixCapture($Case, $Run, [int]$Index, [string]$Directory) {
         if ($LASTEXITCODE -ne 0) { throw 'Fixture inspection failed structurally.' }
         $inspection = Get-Content -LiteralPath $inspectionPath -Raw | ConvertFrom-Json
         Write-Host "Fixture $($Case.id)/$($Run.id)/$Index : $($inspection.status) ($($data.attempt.terminal.outcome))"
+        $record = [ordered]@{
+            run_id = $Run.id; repetition = $Index; outcome = $data.attempt.terminal.outcome
+            terminal_command_index = $data.attempt.terminal.command_index
+            observation_status = $inspection.status; checks = $inspection.checks
+            observed_mode_sequences = $inspection.observed_mode_sequences
+            capture_sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+        if ($matrix.schema_version -eq 2) {
+            foreach ($name in @('observed_mechanics_sequences', 'mechanics_availability', 'mechanics_checks', 'mechanics_observation_scope')) {
+                $record[$name] = $inspection.$name
+            }
+        }
         return [pscustomobject]@{
             Path = $destination; Data = $data; Inspection = $inspection
-            Record = [ordered]@{
-                run_id = $Run.id; repetition = $Index; outcome = $data.attempt.terminal.outcome
-                terminal_command_index = $data.attempt.terminal.command_index
-                observation_status = $inspection.status; checks = $inspection.checks
-                observed_mode_sequences = $inspection.observed_mode_sequences
-                capture_sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
-            }
+            Record = $record
         }
     } finally {
         if (-not $process.HasExited -and $process.Path -eq $exe) {
@@ -135,7 +141,13 @@ try {
             & $python -m axiom fixture-response $validatedPath $firstRuns[$check.reference_run] $firstRuns[$check.changed_run] --case $case.id --check $check.id --json $responsePath
             if ($LASTEXITCODE -ne 0) { throw 'Matrix response contrast failed structurally.' }
             $response = Get-Content -LiteralPath $responsePath -Raw | ConvertFrom-Json
-            $responses += [ordered]@{ check_id = $check.id; status = $response.status; checks = $response.checks; first_difference = $response.first_difference }
+            $responseRecord = [ordered]@{ check_id = $check.id; status = $response.status; checks = $response.checks; first_difference = $response.first_difference }
+            if ($matrix.schema_version -eq 2) {
+                foreach ($name in @('required_mechanics', 'mechanics_predicate_availability', 'shared_pre_ending_mode_samples', 'shared_mechanics_predicate_samples', 'mechanics_observation_scope')) {
+                    $responseRecord[$name] = $response.$name
+                }
+            }
+            $responses += $responseRecord
         }
         $allMatched = @($records | Where-Object { $_.observation_status -ne 'fixture_observations_match' }).Count -eq 0
         $responsesMatched = @($responses | Where-Object { $_.status -ne 'selected_response_observed' }).Count -eq 0
@@ -151,7 +163,7 @@ try {
     }
     $passedAll = @($results | Where-Object { $_.case_gate -ne 'passed_for_declared_recorded_subset' }).Count -eq 0
     $manifest = [ordered]@{
-        schema_version = 1; kind = 'native_fixture_matrix_result'; recorded_at_utc = [DateTime]::UtcNow.ToString('o')
+        schema_version = $matrix.schema_version; kind = 'native_fixture_matrix_result'; recorded_at_utc = [DateTime]::UtcNow.ToString('o')
         analysis_source_commit = $sourceCommit; analysis_file_sha256 = $analysisFiles
         source_specification_sha256 = $sourceSpecificationHash
         specification_sha256 = (Get-FileHash -LiteralPath $validatedPath -Algorithm SHA256).Hash.ToLowerInvariant()
