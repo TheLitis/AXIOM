@@ -1,0 +1,1920 @@
+{
+  "schema_version": 3,
+  "kind": "native_fixture_matrix",
+  "provenance": {
+    "origin": "generated_synthetic",
+    "native_verification": "not_recorded"
+  },
+  "clock": "processCommands_call_index",
+  "cases": [
+    {
+      "id": "raised-platform-positive",
+      "label": "Raised solid platform: positive",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1,2,240,3,15,57,101;1,1,2,270,3,15,57,102;1,1,2,300,3,15,57,103;1,1,2,330,3,15,57,104;1,1,2,360,3,15,57,105;1,1,2,600,3,-15;",
+      "level_sha256": "b7fa8bed0ec63cb222b8a651729f972bba115a76b8f7998b6aa7b1095d7cf534",
+      "mechanics_intent": [
+        "cube-jump",
+        "solid-contact",
+        "raised-platform"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "died",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 130,
+              "button": 1,
+              "player": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 160,
+              "button": 1,
+              "player": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            },
+            {
+              "id": "grounded-on-raised-platform",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 219,
+                "last": 270
+              },
+              "min_samples": 1,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 135,
+                  "maximum": 135
+                }
+              }
+            }
+          ],
+          "required_effect_checks": [
+            {
+              "id": "land-on-raised-solid",
+              "event": "PlayerObject::collidedWithObject",
+              "player": 1,
+              "object_group_id": 103,
+              "command_window": {
+                "first": 210,
+                "last": 240
+              },
+              "min_events": 1,
+              "native_return": true,
+              "player_change": {
+                "field": "is_on_ground",
+                "before": false,
+                "after": true
+              },
+              "target_change": null
+            }
+          ]
+        }
+      ],
+      "response_checks": [],
+      "watch_groups": [
+        101,
+        102,
+        103,
+        104,
+        105
+      ]
+    },
+    {
+      "id": "raised-platform-control",
+      "label": "Raised solid platform: control",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1,2,240,3,-15,57,101;1,1,2,270,3,-15,57,102;1,1,2,300,3,-15,57,103;1,1,2,330,3,-15,57,104;1,1,2,360,3,-15,57,105;1,1,2,600,3,-15;",
+      "level_sha256": "9901b830df7a44352549c1c85ef873c75f77338d16e5f11e66046ced5a319b51",
+      "mechanics_intent": [
+        "cube-jump",
+        "solid-contact",
+        "raised-platform"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 130,
+              "button": 1,
+              "player": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 160,
+              "button": 1,
+              "player": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            },
+            {
+              "id": "grounded-over-flush-control",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 219,
+                "last": 270
+              },
+              "min_samples": 1,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        }
+      ],
+      "response_checks": [],
+      "watch_groups": [
+        101,
+        102,
+        103,
+        104,
+        105
+      ]
+    },
+    {
+      "id": "slope-ascent-positive",
+      "label": "Ascending solid slope: positive",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1743,2,240,3,15,57,101;1,1,2,600,3,-15;",
+      "level_sha256": "1979996f8fded1c7dfb3609cda71e2b5023e89594c173ce2fc82718276059022",
+      "mechanics_intent": [
+        "cube",
+        "slope-contact"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            },
+            {
+              "id": "grounded-on-slope",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 170,
+                "last": 190
+              },
+              "min_samples": 1,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": true,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 150
+                }
+              }
+            }
+          ],
+          "required_effect_checks": [
+            {
+              "id": "enter-watched-slope",
+              "event": "PlayerObject::collidedWithSlopeInternal",
+              "player": 1,
+              "object_group_id": 101,
+              "command_window": {
+                "first": 160,
+                "last": 200
+              },
+              "min_events": 1,
+              "native_return": null,
+              "player_change": {
+                "field": "is_on_slope",
+                "before": false,
+                "after": true
+              },
+              "target_change": null
+            }
+          ]
+        }
+      ],
+      "response_checks": [],
+      "watch_groups": [
+        101
+      ]
+    },
+    {
+      "id": "slope-ascent-control",
+      "label": "Ascending solid slope: control",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1,2,240,3,-15,57,101;1,1,2,600,3,-15;",
+      "level_sha256": "a5c7f87fd5a17846167f2af23acbc33296128894aed5d09d7b886568f51099a6",
+      "mechanics_intent": [
+        "cube",
+        "slope-contact"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            },
+            {
+              "id": "grounded-over-flush-control",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 170,
+                "last": 190
+              },
+              "min_samples": 1,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        }
+      ],
+      "response_checks": [],
+      "watch_groups": [
+        101
+      ]
+    },
+    {
+      "id": "ceiling-contact-positive",
+      "label": "Jump into a solid ceiling: positive",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1,2,210,3,75,57,101;1,1,2,240,3,75,57,102;1,1,2,270,3,75,57,103;1,1,2,300,3,75,57,104;1,1,2,330,3,75,57,105;1,1,2,600,3,-15;",
+      "level_sha256": "00313de51e73931730143b8f4ef76c4164b41dba74357396d82739c2508df7f3",
+      "mechanics_intent": [
+        "cube-jump",
+        "solid-contact",
+        "native-death"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 130,
+              "button": 1,
+              "player": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 140,
+              "button": 1,
+              "player": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "died",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            },
+            {
+              "id": "airborne-below-low-ceiling",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 135,
+                "last": 149
+              },
+              "min_samples": 1,
+              "predicates": {
+                "is_on_ground": false,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 120,
+                  "maximum": 150
+                }
+              }
+            }
+          ],
+          "required_effect_checks": [
+            {
+              "id": "ceiling-contact-causes-death",
+              "event": "PlayerObject::collidedWithObject",
+              "player": 1,
+              "object_group_id": 101,
+              "command_window": {
+                "first": 145,
+                "last": 155
+              },
+              "min_events": 1,
+              "native_return": true,
+              "player_change": {
+                "field": "is_dead",
+                "before": false,
+                "after": true
+              },
+              "target_change": null
+            }
+          ]
+        }
+      ],
+      "response_checks": [],
+      "watch_groups": [
+        101,
+        102,
+        103,
+        104,
+        105
+      ]
+    },
+    {
+      "id": "ceiling-contact-control",
+      "label": "Jump into a solid ceiling: control",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1,2,210,3,225,57,101;1,1,2,240,3,225,57,102;1,1,2,270,3,225,57,103;1,1,2,300,3,225,57,104;1,1,2,330,3,225,57,105;1,1,2,600,3,-15;",
+      "level_sha256": "890ea8afac543b6a6680b2f071c132c59e47391815bf039167bcc4255632b8d9",
+      "mechanics_intent": [
+        "cube-jump",
+        "solid-contact",
+        "native-death"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [
+            {
+              "command_index": 130,
+              "button": 1,
+              "player": 1,
+              "pressed": true
+            },
+            {
+              "command_index": 140,
+              "button": 1,
+              "player": 1,
+              "pressed": false
+            }
+          ],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            },
+            {
+              "id": "airborne-below-high-ceiling",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 135,
+                "last": 149
+              },
+              "min_samples": 1,
+              "predicates": {
+                "is_on_ground": false,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 120,
+                  "maximum": 150
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        }
+      ],
+      "response_checks": [],
+      "watch_groups": [
+        101,
+        102,
+        103,
+        104,
+        105
+      ]
+    },
+    {
+      "id": "toggle-solid-off-positive",
+      "label": "Direct group toggle disables a solid wall: positive",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1049,2,150,3,15,51,101,56,0;1,1,2,300,3,15,57,101;1,1,2,600,3,-15;",
+      "level_sha256": "c755c441665fc504222f8837305ca3be417e99578aa28a1892577bc6f24ba690",
+      "mechanics_intent": [
+        "cube",
+        "group-toggle",
+        "watched-wall"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": [
+            {
+              "id": "disable-watched-wall",
+              "event": "GJBaseGameLayer::toggleGroup",
+              "player": null,
+              "object_group_id": null,
+              "command_window": {
+                "first": 110,
+                "last": 125
+              },
+              "min_events": 1,
+              "native_return": null,
+              "player_change": null,
+              "target_change": {
+                "group_id": 101,
+                "field": "is_group_disabled",
+                "before": false,
+                "after": true
+              }
+            }
+          ]
+        }
+      ],
+      "response_checks": [],
+      "watch_groups": [
+        101
+      ]
+    },
+    {
+      "id": "toggle-solid-off-control",
+      "label": "Direct group toggle disables a solid wall: control",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1049,2,150,3,15,51,999,56,0;1,1,2,300,3,15,57,101;1,1,2,600,3,-15;",
+      "level_sha256": "42f75db68eef3d1f99eccb0ed09a886ce9865493c94a6d26484adf67e3e05fb9",
+      "mechanics_intent": [
+        "cube",
+        "group-toggle",
+        "watched-wall"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "died",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "died",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            },
+            {
+              "id": "grounded-before-active-wall",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 170,
+                "last": 210
+              },
+              "min_samples": 1,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        }
+      ],
+      "response_checks": [],
+      "watch_groups": [
+        101
+      ]
+    },
+    {
+      "id": "move-solid-away-positive",
+      "label": "Move command raises a solid wall: positive",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,901,2,150,3,15,51,101,10,0.25,28,0,29,120,30,0;1,1,2,300,3,15,57,101;1,1,2,600,3,-15;",
+      "level_sha256": "a8044026f404608d38ceaf3f2b6ffad0c2738d1fd65248fc1603a96471bca9c8",
+      "mechanics_intent": [
+        "cube",
+        "group-move",
+        "watched-wall"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": [
+            {
+              "id": "raise-watched-wall",
+              "event": "GJBaseGameLayer::triggerMoveCommand",
+              "player": null,
+              "object_group_id": null,
+              "command_window": {
+                "first": 110,
+                "last": 200
+              },
+              "min_events": 1,
+              "native_return": null,
+              "player_change": null,
+              "target_change": {
+                "group_id": 101,
+                "field": "y",
+                "before": 105,
+                "after": 225
+              }
+            }
+          ]
+        }
+      ],
+      "response_checks": [],
+      "watch_groups": [
+        101
+      ]
+    },
+    {
+      "id": "move-solid-away-control",
+      "label": "Move command raises a solid wall: control",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,901,2,150,3,15,51,101,10,0.25,28,0,29,0,30,0;1,1,2,300,3,15,57,101;1,1,2,600,3,-15;",
+      "level_sha256": "8a1f9b3198b4fa5d9c0195d3365f9ea2c7a8b969f3563c5e898a8cf9d424a4a0",
+      "mechanics_intent": [
+        "cube",
+        "group-move",
+        "watched-wall"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "died",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "died",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            },
+            {
+              "id": "grounded-before-unmoved-wall",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 170,
+                "last": 210
+              },
+              "min_samples": 1,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        }
+      ],
+      "response_checks": [],
+      "watch_groups": [
+        101
+      ]
+    },
+    {
+      "id": "spawn-toggle-chain-positive",
+      "label": "Spawn dispatch reaches a remote group toggle: positive",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1268,2,150,3,15,51,202,63,0.15;1,1049,2,450,3,15,57,202,62,1,51,101,56,0;1,1,2,300,3,15,57,101;1,1,2,600,3,-15;",
+      "level_sha256": "189d78da61ebb10ddcf4f26b0a2c51cb0fcf8d0063d810ba69b58eafc991f595",
+      "mechanics_intent": [
+        "cube",
+        "spawn-dispatch",
+        "group-toggle",
+        "watched-wall"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "completed",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": [
+            {
+              "id": "spawn-child-disables-wall",
+              "event": "GJBaseGameLayer::toggleGroup",
+              "player": null,
+              "object_group_id": null,
+              "command_window": {
+                "first": 140,
+                "last": 170
+              },
+              "min_events": 1,
+              "native_return": null,
+              "player_change": null,
+              "target_change": {
+                "group_id": 101,
+                "field": "is_group_disabled",
+                "before": false,
+                "after": true
+              }
+            }
+          ]
+        }
+      ],
+      "response_checks": [],
+      "watch_groups": [
+        101,
+        202
+      ]
+    },
+    {
+      "id": "spawn-toggle-chain-control",
+      "label": "Spawn dispatch reaches a remote group toggle: control",
+      "level_string": "kA13,0,kA15,0,kA16,0,kA14,0;1,1268,2,150,3,15,51,999,63,0.15;1,1049,2,450,3,15,57,202,62,1,51,101,56,0;1,1,2,300,3,15,57,101;1,1,2,600,3,-15;",
+      "level_sha256": "031827223091a3cb097f83b1d05d6b8259ff122c9f7612e323c2ced1cdaa8766",
+      "mechanics_intent": [
+        "cube",
+        "spawn-dispatch",
+        "group-toggle",
+        "watched-wall"
+      ],
+      "runs": [
+        {
+          "id": "baseline",
+          "role": "baseline",
+          "input_mode": "observation",
+          "inputs": [],
+          "expected_outcome": "died",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        },
+        {
+          "id": "replay",
+          "role": "replay",
+          "input_mode": "replay",
+          "inputs": [],
+          "expected_outcome": "died",
+          "required_mode_sequences": {
+            "player1": [
+              "cube"
+            ],
+            "player2": null
+          },
+          "required_mechanics_sequences": {
+            "player1": {
+              "gravity_inverted": [
+                false
+              ],
+              "vehicle_size": [
+                1
+              ],
+              "player_speed": [
+                0.8999999761581421
+              ]
+            },
+            "player2": null,
+            "dual_active": [
+              false
+            ]
+          },
+          "required_state_witnesses": [
+            {
+              "id": "initial-grounded-cube",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 2,
+                "last": 64
+              },
+              "min_samples": 8,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            },
+            {
+              "id": "grounded-before-active-wall",
+              "player": 1,
+              "mode": "cube",
+              "command_window": {
+                "first": 170,
+                "last": 210
+              },
+              "min_samples": 1,
+              "predicates": {
+                "is_on_ground": true,
+                "is_on_slope": false,
+                "gravity_inverted": false,
+                "vehicle_size": 1,
+                "player_speed": 0.8999999761581421,
+                "dual_active": false,
+                "y": {
+                  "minimum": 105,
+                  "maximum": 105
+                }
+              }
+            }
+          ],
+          "required_effect_checks": []
+        }
+      ],
+      "response_checks": [],
+      "watch_groups": [
+        101,
+        202
+      ]
+    }
+  ]
+}

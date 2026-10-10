@@ -1,0 +1,605 @@
+{
+  "schema_version": 1,
+  "kind": "native_fixture_variant_study",
+  "provenance": {
+    "origin": "generated_synthetic",
+    "native_verification": "not_recorded"
+  },
+  "fixture_matrix_sha256": "52bc9c59219365d9e317de3b4f1dd4a29d365ca2bd365441c5484091c84885ec",
+  "cases": [
+    {
+      "id": "raised-platform",
+      "positive": {
+        "case_id": "raised-platform-positive",
+        "run_id": "replay"
+      },
+      "control": {
+        "case_id": "raised-platform-control",
+        "run_id": "replay"
+      },
+      "controlled_changes": [
+        {
+          "object_index": 0,
+          "property_key": "3",
+          "positive": "15",
+          "control": "-15"
+        },
+        {
+          "object_index": 1,
+          "property_key": "3",
+          "positive": "15",
+          "control": "-15"
+        },
+        {
+          "object_index": 2,
+          "property_key": "3",
+          "positive": "15",
+          "control": "-15"
+        },
+        {
+          "object_index": 3,
+          "property_key": "3",
+          "positive": "15",
+          "control": "-15"
+        },
+        {
+          "object_index": 4,
+          "property_key": "3",
+          "positive": "15",
+          "control": "-15"
+        }
+      ],
+      "prefix_window": {
+        "first": 0,
+        "last": 217
+      },
+      "response_window": {
+        "first": 218,
+        "last": 300
+      },
+      "response_kind": "selected_trajectory",
+      "player": 1,
+      "fields": [
+        "y",
+        "y_velocity",
+        "is_on_ground"
+      ],
+      "required_mechanics": {
+        "mode": "cube",
+        "gravity_inverted": false,
+        "vehicle_size": 1,
+        "player_speed": 0.8999999761581421,
+        "dual_active": false
+      },
+      "receipt_requirements": [
+        {
+          "variant": "positive",
+          "event": "PlayerObject::collidedWithObject",
+          "player": 1,
+          "object_group_id": 103,
+          "command_window": {
+            "first": 210,
+            "last": 240
+          },
+          "arguments": {
+            "skip_check": false
+          },
+          "min_events": 1,
+          "ancestor": null
+        }
+      ],
+      "constant_target_checks": []
+    },
+    {
+      "id": "slope-ascent",
+      "positive": {
+        "case_id": "slope-ascent-positive",
+        "run_id": "replay"
+      },
+      "control": {
+        "case_id": "slope-ascent-control",
+        "run_id": "replay"
+      },
+      "controlled_changes": [
+        {
+          "object_index": 0,
+          "property_key": "1",
+          "positive": "1743",
+          "control": "1"
+        },
+        {
+          "object_index": 0,
+          "property_key": "3",
+          "positive": "15",
+          "control": "-15"
+        }
+      ],
+      "prefix_window": {
+        "first": 0,
+        "last": 168
+      },
+      "response_window": {
+        "first": 169,
+        "last": 230
+      },
+      "response_kind": "selected_trajectory",
+      "player": 1,
+      "fields": [
+        "y",
+        "y_velocity",
+        "is_on_slope"
+      ],
+      "required_mechanics": {
+        "mode": "cube",
+        "gravity_inverted": false,
+        "vehicle_size": 1,
+        "player_speed": 0.8999999761581421,
+        "dual_active": false
+      },
+      "receipt_requirements": [
+        {
+          "variant": "positive",
+          "event": "PlayerObject::collidedWithSlopeInternal",
+          "player": 1,
+          "object_group_id": 101,
+          "command_window": {
+            "first": 160,
+            "last": 200
+          },
+          "arguments": {
+            "forced": false
+          },
+          "min_events": 1,
+          "ancestor": null
+        }
+      ],
+      "constant_target_checks": []
+    },
+    {
+      "id": "ceiling-contact",
+      "positive": {
+        "case_id": "ceiling-contact-positive",
+        "run_id": "replay"
+      },
+      "control": {
+        "case_id": "ceiling-contact-control",
+        "run_id": "replay"
+      },
+      "controlled_changes": [
+        {
+          "object_index": 0,
+          "property_key": "3",
+          "positive": "75",
+          "control": "225"
+        },
+        {
+          "object_index": 1,
+          "property_key": "3",
+          "positive": "75",
+          "control": "225"
+        },
+        {
+          "object_index": 2,
+          "property_key": "3",
+          "positive": "75",
+          "control": "225"
+        },
+        {
+          "object_index": 3,
+          "property_key": "3",
+          "positive": "75",
+          "control": "225"
+        },
+        {
+          "object_index": 4,
+          "property_key": "3",
+          "positive": "75",
+          "control": "225"
+        }
+      ],
+      "prefix_window": {
+        "first": 0,
+        "last": 149
+      },
+      "response_window": {
+        "first": 150,
+        "last": 800
+      },
+      "response_kind": "native_terminal_outcome",
+      "player": 1,
+      "fields": [
+        "y",
+        "is_on_ground"
+      ],
+      "required_mechanics": {
+        "mode": "cube",
+        "gravity_inverted": false,
+        "vehicle_size": 1,
+        "player_speed": 0.8999999761581421,
+        "dual_active": false
+      },
+      "receipt_requirements": [
+        {
+          "variant": "positive",
+          "event": "PlayerObject::collidedWithObject",
+          "player": 1,
+          "object_group_id": 101,
+          "command_window": {
+            "first": 145,
+            "last": 155
+          },
+          "arguments": {
+            "skip_check": false
+          },
+          "min_events": 1,
+          "ancestor": null
+        },
+        {
+          "variant": "positive",
+          "event": "PlayLayer::destroyPlayer",
+          "player": 1,
+          "object_group_id": null,
+          "command_window": {
+            "first": 145,
+            "last": 155
+          },
+          "arguments": {},
+          "min_events": 1,
+          "ancestor": {
+            "event": "PlayerObject::collidedWithObject",
+            "arguments": {
+              "skip_check": false
+            }
+          }
+        }
+      ],
+      "constant_target_checks": []
+    },
+    {
+      "id": "toggle-solid-off",
+      "positive": {
+        "case_id": "toggle-solid-off-positive",
+        "run_id": "replay"
+      },
+      "control": {
+        "case_id": "toggle-solid-off-control",
+        "run_id": "replay"
+      },
+      "controlled_changes": [
+        {
+          "object_index": 0,
+          "property_key": "51",
+          "positive": "101",
+          "control": "999"
+        }
+      ],
+      "prefix_window": {
+        "first": 0,
+        "last": 115
+      },
+      "response_window": {
+        "first": 116,
+        "last": 800
+      },
+      "response_kind": "native_terminal_outcome",
+      "player": 1,
+      "fields": [
+        "y",
+        "is_on_ground"
+      ],
+      "required_mechanics": {
+        "mode": "cube",
+        "gravity_inverted": false,
+        "vehicle_size": 1,
+        "player_speed": 0.8999999761581421,
+        "dual_active": false
+      },
+      "receipt_requirements": [
+        {
+          "variant": "positive",
+          "event": "GJBaseGameLayer::toggleGroup",
+          "player": null,
+          "object_group_id": null,
+          "command_window": {
+            "first": 110,
+            "last": 125
+          },
+          "arguments": {
+            "group": 101,
+            "activate": false
+          },
+          "min_events": 1,
+          "ancestor": {
+            "event": "EffectGameObject::triggerObject",
+            "arguments": {
+              "unique_id": 0
+            }
+          }
+        },
+        {
+          "variant": "control",
+          "event": "GJBaseGameLayer::toggleGroup",
+          "player": null,
+          "object_group_id": null,
+          "command_window": {
+            "first": 110,
+            "last": 125
+          },
+          "arguments": {
+            "group": 999,
+            "activate": false
+          },
+          "min_events": 1,
+          "ancestor": {
+            "event": "EffectGameObject::triggerObject",
+            "arguments": {
+              "unique_id": 0
+            }
+          }
+        }
+      ],
+      "constant_target_checks": [
+        {
+          "variant": "control",
+          "group_id": 101,
+          "field": "is_group_disabled",
+          "command_window": {
+            "first": 0,
+            "last": 216
+          },
+          "value": false
+        }
+      ]
+    },
+    {
+      "id": "move-solid-away",
+      "positive": {
+        "case_id": "move-solid-away-positive",
+        "run_id": "replay"
+      },
+      "control": {
+        "case_id": "move-solid-away-control",
+        "run_id": "replay"
+      },
+      "controlled_changes": [
+        {
+          "object_index": 0,
+          "property_key": "29",
+          "positive": "120",
+          "control": "0"
+        }
+      ],
+      "prefix_window": {
+        "first": 0,
+        "last": 115
+      },
+      "response_window": {
+        "first": 116,
+        "last": 800
+      },
+      "response_kind": "native_terminal_outcome",
+      "player": 1,
+      "fields": [
+        "y",
+        "is_on_ground"
+      ],
+      "required_mechanics": {
+        "mode": "cube",
+        "gravity_inverted": false,
+        "vehicle_size": 1,
+        "player_speed": 0.8999999761581421,
+        "dual_active": false
+      },
+      "receipt_requirements": [
+        {
+          "variant": "positive",
+          "event": "GJBaseGameLayer::triggerMoveCommand",
+          "player": null,
+          "object_group_id": null,
+          "command_window": {
+            "first": 110,
+            "last": 125
+          },
+          "arguments": {
+            "target_group_id": 101,
+            "duration": 0.25,
+            "move_offset_x": 0,
+            "move_offset_y": 120
+          },
+          "min_events": 1,
+          "ancestor": {
+            "event": "EffectGameObject::triggerObject",
+            "arguments": {
+              "unique_id": 0
+            }
+          }
+        },
+        {
+          "variant": "control",
+          "event": "GJBaseGameLayer::triggerMoveCommand",
+          "player": null,
+          "object_group_id": null,
+          "command_window": {
+            "first": 110,
+            "last": 125
+          },
+          "arguments": {
+            "target_group_id": 101,
+            "duration": 0.25,
+            "move_offset_x": 0,
+            "move_offset_y": 0
+          },
+          "min_events": 1,
+          "ancestor": {
+            "event": "EffectGameObject::triggerObject",
+            "arguments": {
+              "unique_id": 0
+            }
+          }
+        }
+      ],
+      "constant_target_checks": [
+        {
+          "variant": "control",
+          "group_id": 101,
+          "field": "y",
+          "command_window": {
+            "first": 0,
+            "last": 216
+          },
+          "value": 105
+        }
+      ]
+    },
+    {
+      "id": "spawn-toggle-chain",
+      "positive": {
+        "case_id": "spawn-toggle-chain-positive",
+        "run_id": "replay"
+      },
+      "control": {
+        "case_id": "spawn-toggle-chain-control",
+        "run_id": "replay"
+      },
+      "controlled_changes": [
+        {
+          "object_index": 0,
+          "property_key": "51",
+          "positive": "202",
+          "control": "999"
+        }
+      ],
+      "prefix_window": {
+        "first": 0,
+        "last": 150
+      },
+      "response_window": {
+        "first": 151,
+        "last": 800
+      },
+      "response_kind": "native_terminal_outcome",
+      "player": 1,
+      "fields": [
+        "y",
+        "is_on_ground"
+      ],
+      "required_mechanics": {
+        "mode": "cube",
+        "gravity_inverted": false,
+        "vehicle_size": 1,
+        "player_speed": 0.8999999761581421,
+        "dual_active": false
+      },
+      "receipt_requirements": [
+        {
+          "variant": "positive",
+          "event": "GJBaseGameLayer::spawnGroup",
+          "player": null,
+          "object_group_id": null,
+          "command_window": {
+            "first": 140,
+            "last": 170
+          },
+          "arguments": {
+            "group": 202,
+            "ordered": false
+          },
+          "min_events": 1,
+          "ancestor": null
+        },
+        {
+          "variant": "positive",
+          "event": "EffectGameObject::triggerObject",
+          "player": null,
+          "object_group_id": 202,
+          "command_window": {
+            "first": 140,
+            "last": 170
+          },
+          "arguments": {
+            "unique_id": 0
+          },
+          "min_events": 1,
+          "ancestor": {
+            "event": "GJBaseGameLayer::spawnGroup",
+            "arguments": {
+              "group": 202,
+              "ordered": false
+            }
+          }
+        },
+        {
+          "variant": "positive",
+          "event": "GJBaseGameLayer::toggleGroup",
+          "player": null,
+          "object_group_id": null,
+          "command_window": {
+            "first": 140,
+            "last": 170
+          },
+          "arguments": {
+            "group": 101,
+            "activate": false
+          },
+          "min_events": 1,
+          "ancestor": {
+            "event": "GJBaseGameLayer::spawnGroup",
+            "arguments": {
+              "group": 202,
+              "ordered": false
+            }
+          }
+        },
+        {
+          "variant": "positive",
+          "event": "GJBaseGameLayer::toggleGroup",
+          "player": null,
+          "object_group_id": null,
+          "command_window": {
+            "first": 140,
+            "last": 170
+          },
+          "arguments": {
+            "group": 101,
+            "activate": false
+          },
+          "min_events": 1,
+          "ancestor": {
+            "event": "EffectGameObject::triggerObject",
+            "arguments": {
+              "unique_id": 0
+            }
+          }
+        },
+        {
+          "variant": "control",
+          "event": "GJBaseGameLayer::spawnGroup",
+          "player": null,
+          "object_group_id": null,
+          "command_window": {
+            "first": 140,
+            "last": 170
+          },
+          "arguments": {
+            "group": 999,
+            "ordered": false
+          },
+          "min_events": 1,
+          "ancestor": null
+        }
+      ],
+      "constant_target_checks": [
+        {
+          "variant": "control",
+          "group_id": 101,
+          "field": "is_group_disabled",
+          "command_window": {
+            "first": 0,
+            "last": 216
+          },
+          "value": false
+        }
+      ]
+    }
+  ]
+}

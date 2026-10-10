@@ -3,12 +3,30 @@
 import hashlib
 import json
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from test_fixtures import effect_check, matrix_v3
 from test_native import collision_capture, mechanic_event, save
 
 from axiom.interactions import compare_fixture_variants, load_variant_study
+
+
+def test_public_variant_study_binds_all_frozen_collision_and_trigger_pairs():
+    root = Path(__file__).resolve().parents[1]
+    study = load_variant_study(
+        root / "examples/native/interaction-variants.json", root / "examples/native/interaction-matrix.json"
+    )
+    assert {case["id"] for case in study["cases"]} == {
+        "raised-platform",
+        "slope-ascent",
+        "ceiling-contact",
+        "toggle-solid-off",
+        "move-solid-away",
+        "spawn-toggle-chain",
+    }
+    assert len({case[role]["case_id"] for case in study["cases"] for role in ("positive", "control")}) == 12
+    assert all(case["receipt_requirements"] for case in study["cases"])
 
 
 def artifacts(tmp_path):
