@@ -35,7 +35,8 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
     } catch { $sourceCommit = $null }
 }
 $analysisFiles = [ordered]@{}
-foreach ($relative in @('src/axiom/fixtures.py', 'src/axiom/native.py', 'src/axiom/cli.py', 'scripts/run-native-matrix.ps1')) {
+foreach ($relative in @('src/axiom/fixtures.py', 'src/axiom/native.py', 'src/axiom/cli.py',
+    'scripts/run-native-matrix.ps1', 'scripts/native-experiment-state.ps1', 'scripts/prepare-native-sandbox.ps1')) {
     $analysisFiles[$relative] = (Get-FileHash -LiteralPath (Join-Path $workspace $relative) -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 $sourceSpecificationHash = (Get-FileHash -LiteralPath $matrixFile -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -192,6 +193,14 @@ try {
             comparison_status = $comparison.status; comparison_components = $comparison.component_consistency
             comparison_sha256 = (Get-FileHash -LiteralPath $comparisonPath -Algorithm SHA256).Hash.ToLowerInvariant()
         }
+    }
+    foreach ($relative in $analysisFiles.Keys) {
+        if ((Get-FileHash -LiteralPath (Join-Path $workspace $relative) -Algorithm SHA256).Hash.ToLowerInvariant() -ne $analysisFiles[$relative]) {
+            throw "Analysis source changed during matrix: $relative"
+        }
+    }
+    if ((Get-FileHash -LiteralPath $matrixFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sourceSpecificationHash) {
+        throw 'Source specification changed during matrix.'
     }
     $passedAll = @($results | Where-Object { $_.case_gate -ne 'passed_for_declared_recorded_subset' }).Count -eq 0
     $manifest = [ordered]@{
