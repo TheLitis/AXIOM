@@ -24,6 +24,16 @@ function Assert-OrdinaryFile([string]$Path) {
         }
     }
 }
+function Copy-AxiomFileIfChanged([string]$Source, [string]$Destination) {
+    Assert-OrdinaryFile $Source
+    Assert-OrdinaryFile $Destination
+    if (Test-Path -LiteralPath $Destination) {
+        $sourceHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash
+        $destinationHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash
+        if ($sourceHash -eq $destinationHash) { return }
+    }
+    Copy-Item -LiteralPath $Source -Destination $Destination -Force
+}
 function Get-AxiomDefaultNativePackage([string]$Workspace) {
     $workspaceRoot = [System.IO.Path]::GetFullPath($Workspace).TrimEnd([char[]]'\/')
     Assert-OrdinaryDirectory (Join-Path $workspaceRoot '.tools')
@@ -102,11 +112,11 @@ if ((Get-FileHash -LiteralPath (Join-Path $gameDir 'Geode.dll') -Algorithm SHA25
     throw 'This sandbox fixture requires the pinned Geode 5.8.2 loader binary.'
 }
 New-Item -ItemType Directory -Force $runtimeDir | Out-Null
-Copy-Item -LiteralPath $gameExe -Destination (Join-Path $runtimeDir 'AXIOMSandbox.exe') -Force
+Copy-AxiomFileIfChanged $gameExe (Join-Path $runtimeDir 'AXIOMSandbox.exe')
 Get-ChildItem -LiteralPath $gameDir -File -Filter '*.dll' | ForEach-Object {
-    Copy-Item -LiteralPath $_.FullName -Destination $runtimeDir -Force
+    Copy-AxiomFileIfChanged $_.FullName (Join-Path $runtimeDir $_.Name)
 }
-Copy-Item -LiteralPath (Join-Path $gameDir 'steam_appid.txt') -Destination $runtimeDir -Force
+Copy-AxiomFileIfChanged (Join-Path $gameDir 'steam_appid.txt') (Join-Path $runtimeDir 'steam_appid.txt')
 $resources = Join-Path $runtimeDir 'Resources'
 $sourceResources = Join-Path $gameDir 'Resources'
 if (Test-Path -LiteralPath $resources) {
@@ -122,7 +132,7 @@ New-Item -ItemType Directory -Force $mods | Out-Null
 if (Get-ChildItem -LiteralPath $mods -File | Where-Object Name -ne 'axiom.native-capture.geode') {
     throw 'Unexpected mod in sandbox; preserve it and use a clean test directory.'
 }
-Copy-Item -LiteralPath $packagePath -Destination (Join-Path $mods 'axiom.native-capture.geode') -Force
+Copy-AxiomFileIfChanged $packagePath (Join-Path $mods 'axiom.native-capture.geode')
 $loaderResources = Join-Path $gameDir 'geode/resources/geode.loader'
 if (Test-Path -LiteralPath $loaderResources) {
     $resourceDest = Join-Path $runtimeDir 'geode/resources'
