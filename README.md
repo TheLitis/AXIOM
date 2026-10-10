@@ -20,6 +20,8 @@ The [initial native validation ledger](docs/native-validation.md) retains the fa
 
 The [expanded fixture matrix](docs/native-fixture-matrix.md) passed **55 separate native attempts across 11 cases and eight observed mode labels** under the same fixed Scheduler policy. All 33 active replays completed, all three repeats per case agreed through terminal, and every case established a selected input response against an empty owned-input plan. The two spike controls died as required. Coverage is limited to the declared generated payloads, plans and recorded fields.
 
+A separate [raw mechanics matrix](docs/native-mechanics-matrix.md) passed **56 completed native attempts across 11 generated cases** covering gravity inversion/return, size changes, five observed speed values and entry/exit of dual. All 33 replay attempts agreed through terminal on all 14 comparison components. Twelve controls established a selected input response under matching mechanics conditions in both sampled states, including separate P1 and active-P2 controls in dual. These are checked constructions under the fixed Scheduler intervention, not general coverage of those mechanics or calibrated difficulty.
+
 | Available now | Evidence and limits |
 |---|---|
 | Raw level-string inspection | Exact source/decoded hashes, settings, object IDs, positions and unknown keys; no collider or trigger simulation |
