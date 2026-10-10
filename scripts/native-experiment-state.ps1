@@ -1,4 +1,17 @@
 # Local state preservation for the explicitly isolated experiment profile.
+function Stop-AxiomOwnedProcess([Diagnostics.Process]$Process) {
+    # Callers supply the retained object from their own Start-Process. Never
+    # resolve a process by name/PID here. Dispose the handle after termination.
+    try {
+        if (-not $Process.HasExited) {
+            Stop-Process -InputObject $Process -Force
+            if (-not $Process.WaitForExit(30000)) {
+                throw 'Owned process did not exit within the 30-second cleanup timeout.'
+            }
+        }
+    } finally { $Process.Dispose() }
+}
+
 function Assert-AxiomExperimentPaths([string]$Workspace, [string]$RuntimeDirectory) {
     if (-not $RuntimeDirectory) { $RuntimeDirectory = Join-Path $Workspace '.tools/runtime' }
     $toolsRoot = [IO.Path]::GetFullPath((Join-Path $Workspace '.tools')).TrimEnd([char[]]'\/')

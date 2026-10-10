@@ -103,11 +103,12 @@ function Get-StudyPackageDllHash([string]$Package) {
 function Get-StudyNativeTreeHash {
     $nativeRoot = Join-Path $workspace 'native'
     $identity = ''
-    $files = @(Get-ChildItem -LiteralPath (Join-Path $nativeRoot 'src') -File -Recurse |
-        Where-Object { $_.Extension -in @('.cpp', '.hpp') } | Sort-Object FullName)
-    foreach ($file in $files) {
-        $relative = $file.FullName.Substring($nativeRoot.Length + 1).Replace('\', '/')
-        $identity += $relative + ':' + (Get-StudyHash $file.FullName) + "`n"
+    [string[]]$relativePaths = @(Get-ChildItem -LiteralPath (Join-Path $nativeRoot 'src') -File -Recurse |
+        Where-Object { $_.Extension -in @('.cpp', '.hpp') } |
+        ForEach-Object { $_.FullName.Substring($nativeRoot.Length + 1).Replace('\', '/') })
+    [Array]::Sort($relativePaths, [StringComparer]::Ordinal)
+    foreach ($relative in $relativePaths) {
+        $identity += $relative + ':' + (Get-StudyHash (Join-Path $nativeRoot $relative)) + "`n"
     }
     foreach ($relative in @('CMakeLists.txt', 'mod.json')) {
         $identity += $relative + ':' + (Get-StudyHash (Join-Path $nativeRoot $relative)) + "`n"
@@ -201,10 +202,7 @@ function Invoke-StudyCapture($Selection, [int]$Index, $Record, [string]$Director
     finally {
         $cleanupError = $null
         try {
-            if (-not $process.HasExited) {
-                Stop-Process -InputObject $process -Force
-                if (-not $process.WaitForExit(5000)) { throw 'Owned sandbox process did not exit within cleanup timeout.' }
-            }
+            Stop-AxiomOwnedProcess $process
             $Record.owned_process_cleanup = 'exited'
         } catch {
             $cleanupError = $_
@@ -213,7 +211,6 @@ function Invoke-StudyCapture($Selection, [int]$Index, $Record, [string]$Director
         } finally {
             $Record.finished_at_utc = [DateTime]::UtcNow.ToString('o')
             Write-StudyJson ($stem + '.launch.json') $Record
-            $process.Dispose()
         }
         if ($cleanupError) {
             if ($captureFailure) { throw "Capture failed: $($captureFailure.Exception.Message). Cleanup failed: $($cleanupError.Exception.Message)" }

@@ -114,16 +114,12 @@ function Invoke-MatrixCapture($Case, $Run, [int]$Index, [string]$Directory) {
         $captureFailure = $_
         throw
     } finally {
-        if (-not $process.HasExited) {
-            # The Process object comes directly from this Start-Process call;
-            # retaining its handle also covers a startup with no readable Path.
-            Stop-Process -InputObject $process -Force
-            if (-not $process.WaitForExit(5000)) {
-                if ($captureFailure) {
-                    throw "Capture failed: $($captureFailure.Exception.Message). Owned sandbox process did not exit within cleanup timeout."
-                }
-                throw 'Owned sandbox process did not exit within cleanup timeout.'
+        try { Stop-AxiomOwnedProcess $process }
+        catch {
+            if ($captureFailure) {
+                throw "Capture failed: $($captureFailure.Exception.Message). Cleanup failed: $($_.Exception.Message)"
             }
+            throw
         }
     }
 }

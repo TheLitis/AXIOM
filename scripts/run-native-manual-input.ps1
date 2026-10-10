@@ -87,10 +87,7 @@ try {
     Write-Host "Manual observation recorded: $($result.outcome); input authorship remains unknown in the capture."
 } finally {
     try {
-        if ($process -and -not $process.HasExited) {
-            Stop-Process -InputObject $process -Force
-            if (-not $process.WaitForExit(5000)) { throw 'Owned manual sandbox did not exit within cleanup timeout.' }
-        }
+        if ($process) { Stop-AxiomOwnedProcess $process }
     } finally {
         try {
             Restore-AxiomExperimentSnapshot $snapshot
