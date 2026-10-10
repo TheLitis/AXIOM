@@ -1,6 +1,6 @@
 # AXIOM native adapter — M1
 
-This opt-in Geode mod records native callbacks and a small player-state subset on
+This opt-in Geode mod records native callbacks, selected player fields and explicitly watched objects on
 Windows x64 / Geometry Dash 2.2081 / Geode 5.8.2. It does not calculate AR, prove
 complete engine determinism, infer collision geometry or estimate human limits.
 Build success and a loaded DLL do not establish gameplay capture or replay fidelity.
@@ -32,10 +32,16 @@ launcher are inert without both conditions. A writable-path check guards fixture
 creation. This helper is a smoke test, not evidence that every save access path is
 isolated; the launch procedure must establish that separately.
 
+`--geode:axiom-sandbox-manual` adds the guarded visible **Start AXIOM Test** button
+instead of automatically launching the fixture. `scripts/run-native-manual-input.ps1`
+uses that control for user-operated native-clock observation, with no replay plan
+or synthetic OS input. Driver `none` and input provenance remain unknown; a
+separate user statement cannot authenticate device origin.
+
 ## Capture semantics
 
-New `native_capture` documents have schema version 3 and one `attempt`. The Python
-reader also accepts historical schemas 1 and 2 without fabricating absent fields.
+New `native_capture` documents have schema version 4 and one `attempt`. The Python
+reader strictly accepts historical schemas 1, 2 and 3 without fabricating absent fields.
 Each document includes
 the exact SHA-256 of bytes held in `GJGameLevel::m_levelString`, executable, adapter
 and loaded mod binaries; pinned collector source/SDK/bindings identities;
@@ -86,6 +92,23 @@ comparison includes all new fields through terminal, with two additional dual
 components. The [mechanics matrix](../docs/native-mechanics-matrix.md) defines
 pre-ending sequence requirements and response conditions for checked fixtures.
 
+Schema 4 adds raw `is_on_ground`/`is_on_slope` fields and explicit `object_watches`.
+The launch option `--geode:axiom.native-capture.watch-groups=101,102` requires the
+guarded sandbox. At most eight unique group selectors, each resolving to exactly
+one native object, are accepted. Watched trace/terminal states retain X/Y,
+`is_group_disabled` and `is_disabled`; runtime object UIDs are diagnostics.
+Selected `mechanic_events` retain paired collision/slope/death/move/toggle/spawn
+calls with actor/object identity, arguments, before/after player/target states,
+native return and call nesting/context. A null death object remains null.
+Broadphase, callback entry or a trigger ID alone establishes no applied effect.
+
+Schema 4 also retains `input_delivery` and paired `delivery_events` for UI
+callbacks and queued-button processing, with native queue snapshots and raw
+absolute timestamps. Mechanic and delivery streams each allow at most 4,096
+events; queues at most 256 buttons; object groups/remap vectors at most 64 entries.
+The [interaction contract](../docs/native-interactions.md) defines meaningful
+state/effect witnesses and same-plan controls with different exact level hashes.
+
 `handleButton` records a **requested** event before its original call. Player
 `pushButton`/`releaseButton` record the callback and returned Boolean after the
 original call. The return value has no independently demonstrated meaning of
@@ -98,15 +121,24 @@ translation from observed or GDR events. Recorded wall-time values are diagnosti
 and must be excluded from repeat comparisons. Unauthenticated observed input has
 `input_source="unknown"`.
 
-Replay injects only requested inputs through `handleButton` before specified
-command calls. It uses no position corrections, checkpoint restores or fabricated
-frame-to-second conversion. During replay, non-injector `handleButton` requests
-are suppressed and retained separately in `attempt.blocked_inputs`, with unknown
-origin. A one-shot permission forwards each scheduled request. This owns the
-handler channel, including engine cleanup requests; equivalence to ordinary
-vanilla or human delivery is unverified. Direct player push/release calls bypassing
-this handler are not controlled. The plan and exact replay-file digest are
-retained; repeated trace/outcome checks cover only this declared policy.
+The current input policy is `process-commands-scheduled-delivery-v2`; historical
+schema-2/3 policy identities remain separate. Replay schedules requests before
+specified command calls, with no position corrections, checkpoint restores or
+fabricated frame-to-second conversion. The default `owned-pre-command` driver
+uses `handleButton` and a one-shot permission; other requests, including native
+cleanup, are suppressed into unknown-origin `attempt.blocked_inputs` diagnostics.
+Direct player push/release calls bypassing this handler are not controlled.
+
+`--geode:axiom.native-capture.input-driver=scheduled-ui-callback` instead schedules
+nonempty P1/button-1 plans through Space `UILayer::keyDown/keyUp` at sampled layer
+timestamps, before the original command call. This guarded synthetic route
+retains native queue processing and forwards unknown-origin requests. Actual
+receipts are labelled `observed`, while the plan's declared intent remains replay.
+Observation without replay uses driver `none`, forwards native requests and has
+`input_source="unknown"`. Suppression belongs only to the owned driver. The
+separate delivery comparator retains every actual receipt; queue witnesses and
+matching dynamics cannot override an extra-request disagreement. Scheduled UI
+calls bypass Windows/devices and establish no ordinary-input equivalence.
 
 The scheduler calls the qualified native binding
 `GJBaseGameLayer::handleButton`, which enters Geode's registered handler before
@@ -129,10 +161,12 @@ log error and no claimed complete artifact. Capture is limited to 20,000 command
 calls, 20,000 records in each update stream, 256 phase events, 12,000 delivered plus
 blocked input records and a 16 MiB export.
 
-State fields are `x`, `y`, `y_velocity`, `rotation`, `is_dead` and a mode label for
-each player pointer. They exclude trigger, checkpoint, object, RNG, collision,
-audio, render and other engine state. Equality of this subset is only equality of
-the recorded subset. A second player pointer can exist while inactive.
+Current player fields are `x`, `y`, `y_velocity`, `rotation`, `is_dead`, mode,
+`gravity_inverted`, `vehicle_size`, `player_speed`, `is_on_ground` and `is_on_slope`;
+the layer records `dual_active`. These and selected watched objects/callbacks do
+not describe full world/trigger/checkpoint/RNG/collider/audio/render state.
+Equality of this subset is only equality of the recorded subset. A second player
+pointer can exist while inactive.
 
 ## Isolated clock experiment
 
@@ -165,12 +199,30 @@ native phases and all selected state remain strict comparison evidence. Passing
 an isolated fixed-clock fixture would establish only its recorded subset under
 that intervention, not general engine determinism or M1 physics completion.
 
+Historical schema-3 repeats use 14 components. Schema-4 repeats add strict
+mechanic events, `native_delivery_context_equal`, trace watches and terminal
+watches, for 18 whole-trace components. The explicit `native-delivery-context-v1`
+projection excludes only raw absolute delivery layer/UI/queue timestamp values
+from the cross-run context gate. Event order/nesting, phase, command/update/
+Scheduler context, queue buttons/steps, delivered dt and all actual input receipts
+remain compared. Separate exact raw timestamp equality/first-difference diagnostics
+and signature hashes are retained, with no relative-time conversion. Runtime
+UIDs/wall times remain diagnostic; mechanic snapshots keep their strict equality.
+
 The [generated fixture matrix](../docs/native-fixture-matrix.md) separately
 declares exact level payloads, owned input plans, pre-ending selected mode
 sequences, terminal outcomes and response controls. Its runner compares whole
 recorded replays through terminal. The evidence ledger identifies the tested
 collector and evaluator separately; eight selected mode labels do not establish
 complete physics-state or mechanics coverage.
+
+Select `examples/native/interaction-matrix.json` explicitly for the new matrix;
+its generated specifications remain distinct from measured evidence. The
+`fixture-variants` command uses `examples/native/interaction-variants.json` for
+same-plan constructed controls. `scripts/run-native-delivery-study.ps1` uses a
+confirmed owned matrix as its reference and collects repeated scheduled UI runs,
+retaining positive and negative comparisons. The [interaction ledger](../docs/native-interactions.md)
+keeps confirming evidence pending until it is recorded and audited.
 
 The separate scheduler/action timing is grounded in the pinned SDK's scheduler
 API and the upstream Cocos
