@@ -933,8 +933,9 @@ class $modify(AxiomBaseLayer, GJBaseGameLayer) {
                         run->injecting = false;
                     } else {
                         auto ui = m_uiLayer;
-                        if (!ui || ui->m_gameLayer != this || !ui->m_initialized)
-                            throw std::runtime_error("Active native UILayer unavailable");
+                        if (!ui) throw std::runtime_error("Native UILayer pointer missing");
+                        if (ui->m_gameLayer != this)
+                            throw std::runtime_error("Native UILayer belongs to a different game layer");
                         auto timestamp = axiom::checked(m_timestamp);
                         // This scheduled in-engine callback leaves the native
                         // queued-button path intact. It is not OS input.
