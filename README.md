@@ -31,6 +31,7 @@ The [expanded fixture matrix](docs/native-fixture-matrix.md) passed **55 separat
 | Experimental native capture and replay | Version-specific Geode source, local opt-in capture, binary manifests, death/finish/ending-phase callbacks, paired gameplay/Scheduler updates and selected player fields; incomplete configuration/state coverage |
 | Native capture inspection/comparison | Strict integrity and identity checks; exact comparison of recorded replay subsets; files alone do not establish complete engine determinism |
 | Declared native fixture matrix | Generated level payloads and input plans, pre-ending mode requirements, exact repeated replay checks and owned-input response controls; [contract and evidence](docs/native-fixture-matrix.md) |
+| Raw mechanics capture and conditioned checks | Schema-3 gravity, size, speed and actual dual flag; schema-2 fixture sequences and input-response conditions in both sampled states; [mechanics contract and evidence](docs/native-mechanics-matrix.md) |
 | Portable HTML and JSON | Interactive route selection, window/first-completion plots, source identity and interpretation limits; works offline |
 | Research framework | 64 proposed factors, telemetry design, baseline comparisons and a gated implementation roadmap |
 
@@ -61,7 +62,9 @@ axiom trials examples/trials.json --json reports/trials.json
 axiom native examples/native/synthetic-capture-a.json --json reports/native.json
 axiom native-compare examples/native/synthetic-capture-a.json examples/native/synthetic-capture-b.json --json reports/native-comparison.json
 axiom native-compare examples/native/synthetic-clock-a.json examples/native/synthetic-clock-b.json --json reports/native-clock-comparison.json
+axiom native-compare examples/native/synthetic-mechanics-a.json examples/native/synthetic-mechanics-b.json --json reports/native-mechanics-comparison.json
 axiom fixtures examples/native/fixture-matrix.json --json reports/fixture-specification.json
+axiom fixtures examples/native/mechanics-matrix.json --json reports/mechanics-specification.json
 ```
 
 All commands validate input; unknown evidence remains unknown. The native examples above are synthetic schema fixtures. The fixture catalogue declares generated geometry and intended checks; `fixture-check` and `fixture-response` assess separate supplied captures, without authenticating execution. See [import formats](docs/formats.md), [timing scenarios](docs/timing-format.md), [cohorts](docs/survival-format.md), [oracle ledgers](docs/oracle-format.md) and [native operation and acceptance](docs/native-adapter.md). Building the native mod requires a separate compiler/SDK setup; Python analysis remains dependency-free.
@@ -84,7 +87,7 @@ Physical feasibility, execution difficulty and learning difficulty remain separa
 
 ## Next scientific milestone
 
-Extend the checked mode/plan matrix to gravity, size, speed, dual and richer collision/trigger combinations; test ordinary-input equivalence, complete environment coverage, interruptions, recording overhead and measured throughput. Establish the supported replay domain before deriving timing windows. Then test whether a calibrated section-success model improves predictions on unseen players against an independent-window baseline.
+Extend the checked mechanics matrix to richer combinations, collisions and triggers; test ordinary-input equivalence, complete environment coverage, interruptions, recording overhead and measured throughput. Establish the supported replay domain before deriving timing windows. Then test whether a calibrated section-success model improves predictions on unseen players against an independent-window baseline.
 
 Native integration is experimental; automatic window discovery, perception/learning models and real-level leaderboards remain **planned work**, with acceptance gates in the [roadmap](docs/roadmap.md). Geode, Frame Window Counter, NaNDL and the statistical/motor-control literature are prior work, documented with primary references in [research sources](docs/research-sources.md).
 

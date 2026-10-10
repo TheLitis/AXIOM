@@ -34,8 +34,8 @@ isolated; the launch procedure must establish that separately.
 
 ## Capture semantics
 
-New `native_capture` documents have schema version 2 and one `attempt`. The Python
-reader also accepts historical schema 1 documents without the new diagnostics.
+New `native_capture` documents have schema version 3 and one `attempt`. The Python
+reader also accepts historical schemas 1 and 2 without fabricating absent fields.
 Each document includes
 the exact SHA-256 of bytes held in `GJGameLevel::m_levelString`, executable, adapter
 and loaded mod binaries; pinned collector source/SDK/bindings identities;
@@ -74,6 +74,17 @@ including before/after flags, command index and update/scheduler membership. The
 are observations at native boundaries; no position or elapsed-time threshold is
 used to classify a finish phase. All flags, rotations and states remain in full
 repeat comparisons.
+
+Schema 3 additionally records `gravity_inverted` from `m_isUpsideDown`,
+`vehicle_size` from `m_vehicleSize`, and `player_speed` from `m_playerSpeed` in
+each selected player sample, including the terminal snapshot. These are raw
+Boolean/finite numeric fields; size categories, hitboxes, speed units and actual
+velocity are not inferred. The layer sample records `dual_active` from
+`m_gameState.m_isDualMode`, declared separately as `layer_state_fields`.
+An existing player-2 pointer does not establish dual activity. Schema-3 repeat
+comparison includes all new fields through terminal, with two additional dual
+components. The [mechanics matrix](../docs/native-mechanics-matrix.md) defines
+pre-ending sequence requirements and response conditions for checked fixtures.
 
 `handleButton` records a **requested** event before its original call. Player
 `pushButton`/`releaseButton` record the callback and returned Boolean after the
