@@ -165,10 +165,14 @@ Json playerState(PlayerObject* player) {
         player->m_isSwing ? "swing" : "cube";
     return matjson::makeObject({{"x", checked(position.x)}, {"y", checked(position.y)},
         {"y_velocity", checked(player->m_yVelocity)}, {"rotation", checked(player->getRotation())},
-        {"is_dead", player->m_isDead}, {"mode", mode}});
+        {"is_dead", player->m_isDead}, {"mode", mode},
+        {"gravity_inverted", player->m_isUpsideDown},
+        {"vehicle_size", checked(player->m_vehicleSize)},
+        {"player_speed", checked(player->m_playerSpeed)}});
 }
 Json state(GJBaseGameLayer* layer) {
-    return matjson::makeObject({{"player1", playerState(layer->m_player1)}, {"player2", playerState(layer->m_player2)}});
+    return matjson::makeObject({{"player1", playerState(layer->m_player1)},
+        {"player2", playerState(layer->m_player2)}, {"dual_active", layer->m_gameState.m_isDualMode}});
 }
 Json phase(GJBaseGameLayer* layer) {
     // Runs are owned only by PlayLayer. These are raw fields, not a gameplay/
@@ -468,7 +472,7 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
         active = std::make_unique<Run>(layer);
         active->replay = option("replay-enabled", "replay");
         active->document = matjson::makeObject({
-            {"schema_version", 2}, {"kind", "native_capture"},
+            {"schema_version", 3}, {"kind", "native_capture"},
             {"provenance", matjson::makeObject({{"origin", "native-engine-capture"}, {"independently_verified", false}, {"state_completeness", "selected_fields_only"}})},
             {"collector", matjson::makeObject({{"id", "axiom.native-capture"}, {"version", "0.1.0"},
                 {"source_commit", AXIOM_SOURCE_COMMIT}, {"source_tree_sha256", AXIOM_SOURCE_TREE_SHA256},
@@ -477,7 +481,9 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
             {"challenge", matjson::makeObject({{"id", "native-" + levelHash.substr(0, 16)}, {"level_sha256", levelHash},
                 {"game_version", "2.2081"}, {"physics_version", "native-2.2081-uncharacterized"},
                 {"input_policy", Policy}, {"environment_id", envHash}})},
-            {"state_fields", Json(std::vector<Json>{"x", "y", "y_velocity", "rotation", "is_dead", "mode"})},
+            {"state_fields", Json(std::vector<Json>{"x", "y", "y_velocity", "rotation", "is_dead", "mode",
+                "gravity_inverted", "vehicle_size", "player_speed"})},
+            {"layer_state_fields", Json(std::vector<Json>{"dual_active"})},
             {"integrity", matjson::makeObject({{"recording_complete", true}, {"dropped_records", 0}, {"errors", Json::array()}})},
             {"attempt", matjson::makeObject({{"id", std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count()) + "-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(++runId)}, {"start_kind", startKind},
@@ -488,6 +494,7 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
             {"limitations", Json(std::vector<Json>{"Selected state is not a complete resumable snapshot.",
                 "The processCommands call clock is not a demonstrated physics or hardware input clock.",
                 "Mod settings and all game configuration are not yet exhaustively captured.",
+                "Gravity, size, speed and dual are raw selected fields, not a calibrated physics model or complete state.",
                 "No physical input provenance or human difficulty calibration is established.",
                 "Replay suppresses non-injector handleButton requests of unknown origin and retains blocked_inputs diagnostics.",
                 "Direct PlayerObject push/release calls bypassing handleButton are not controlled by replay channel ownership.",
