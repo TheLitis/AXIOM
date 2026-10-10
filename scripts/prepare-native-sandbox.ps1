@@ -1,13 +1,18 @@
 param(
     [Parameter(Mandatory = $true)][string]$GameDirectory,
-    [string]$NativePackage
+    [string]$NativePackage,
+    [string]$RuntimeDirectory
 )
 
 # Copies local, legally installed binaries into an ignored test directory.
 # Does not launch, modify the original installation, or copy personal saves.
 $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
-$runtimeDir = Join-Path $workspace '.tools/runtime'
+$runtimeDir = if ($RuntimeDirectory) { [IO.Path]::GetFullPath($RuntimeDirectory) } else { Join-Path $workspace '.tools/runtime' }
+$toolsRoot = [IO.Path]::GetFullPath((Join-Path $workspace '.tools')).TrimEnd([char[]]'\/')
+if (-not $runtimeDir.StartsWith($toolsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Runtime directory must remain below workspace .tools.'
+}
 function Assert-OrdinaryDirectory([string]$Path) {
     if (Test-Path -LiteralPath $Path) {
         $item = Get-Item -LiteralPath $Path -Force
@@ -23,6 +28,11 @@ function Assert-OrdinaryFile([string]$Path) {
             throw "Sandbox file must not be a directory or reparse point: $Path"
         }
     }
+}
+$runtimeAncestor = $runtimeDir
+while ($runtimeAncestor -ne $toolsRoot) {
+    Assert-OrdinaryDirectory $runtimeAncestor
+    $runtimeAncestor = [IO.Path]::GetDirectoryName($runtimeAncestor)
 }
 function Copy-AxiomFileIfChanged([string]$Source, [string]$Destination) {
     Assert-OrdinaryFile $Source

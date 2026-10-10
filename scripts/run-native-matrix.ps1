@@ -4,7 +4,8 @@ param(
     [string[]]$CaseId,
     [ValidateRange(2, 16)][int]$Repetitions = 3,
     [ValidateSet('native', 'fixed-base-60', 'fixed-scheduler-240')][string]$ClockPolicy = 'fixed-scheduler-240',
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [string]$RuntimeDirectory
 )
 
 # Generated fixtures are specifications, not authenticated measurements or AR.
@@ -46,12 +47,12 @@ if ($CaseId) {
     }
     $cases = @($cases | Where-Object { $CaseId -contains $_.id })
 }
-$runtime = Join-Path $workspace '.tools/runtime'
+$runtime = if ($RuntimeDirectory) { [IO.Path]::GetFullPath($RuntimeDirectory) } else { Join-Path $workspace '.tools/runtime' }
 $exe = Join-Path $runtime 'AXIOMSandbox.exe'
 $profile = Join-Path $env:LOCALAPPDATA 'AXIOMSandbox/geode/mods/axiom.native-capture'
 $captures = Join-Path $profile 'captures'
 . (Join-Path $PSScriptRoot 'native-experiment-state.ps1')
-$snapshot = Get-AxiomExperimentSnapshot $workspace
+$snapshot = Get-AxiomExperimentSnapshot $workspace $runtime
 $results = @()
 $priorExecutionState = $null
 
@@ -59,8 +60,12 @@ function Invoke-MatrixCapture($Case, $Run, [int]$Index, [string]$Directory) {
     $before = @{}
     Get-ChildItem -LiteralPath $captures -File -Filter '*.json' -ErrorAction SilentlyContinue | ForEach-Object { $before[$_.Name] = $true }
     $arguments = @('--geode:axiom-sandbox', "--geode:axiom.native-capture.clock-policy=$ClockPolicy")
+    if ($matrix.schema_version -eq 3 -and $Case.watch_groups.Count) {
+        $arguments += '--geode:axiom.native-capture.watch-groups=' + ($Case.watch_groups -join ',')
+    }
     if ($Run.input_mode -eq 'replay') { $arguments += '--geode:axiom.native-capture.replay' }
-    $process = Start-Process -FilePath $exe -WorkingDirectory $runtime -ArgumentList $arguments -WindowStyle Hidden -PassThru
+    $stem = Join-Path $Directory ("$($Run.id)-$Index")
+    $process = Start-Process -FilePath $exe -WorkingDirectory $runtime -ArgumentList $arguments -WindowStyle Hidden -RedirectStandardOutput ($stem + '.stdout.txt') -RedirectStandardError ($stem + '.stderr.txt') -PassThru
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $captureFailure = $null
     try {
@@ -90,8 +95,13 @@ function Invoke-MatrixCapture($Case, $Run, [int]$Index, [string]$Directory) {
             observed_mode_sequences = $inspection.observed_mode_sequences
             capture_sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
         }
-        if ($matrix.schema_version -eq 2) {
+        if ($matrix.schema_version -ge 2) {
             foreach ($name in @('observed_mechanics_sequences', 'mechanics_availability', 'mechanics_checks', 'mechanics_observation_scope')) {
+                $record[$name] = $inspection.$name
+            }
+        }
+        if ($matrix.schema_version -eq 3) {
+            foreach ($name in @('state_witness_checks', 'effect_checks', 'contact_effect_observation_scope')) {
                 $record[$name] = $inspection.$name
             }
         }
@@ -103,8 +113,10 @@ function Invoke-MatrixCapture($Case, $Run, [int]$Index, [string]$Directory) {
         $captureFailure = $_
         throw
     } finally {
-        if (-not $process.HasExited -and $process.Path -eq $exe) {
-            Stop-Process -Id $process.Id
+        if (-not $process.HasExited) {
+            # The Process object comes directly from this Start-Process call;
+            # retaining its handle also covers a startup with no readable Path.
+            Stop-Process -InputObject $process -Force
             if (-not $process.WaitForExit(5000)) {
                 if ($captureFailure) {
                     throw "Capture failed: $($captureFailure.Exception.Message). Owned sandbox process did not exit within cleanup timeout."
@@ -124,7 +136,7 @@ try {
     $priorExecutionState = [AxiomMatrixPower]::SetThreadExecutionState([uint32]2147483651)
     if (-not $priorExecutionState) { throw 'Unable to request a usable system/display execution state.' }
     Write-Host 'Temporary system/display execution-state request active for matrix.'
-    & (Join-Path $PSScriptRoot 'prepare-native-sandbox.ps1') -GameDirectory $GameDirectory
+    & (Join-Path $PSScriptRoot 'prepare-native-sandbox.ps1') -GameDirectory $GameDirectory -RuntimeDirectory $runtime
     foreach ($case in $cases) {
         $casePath = Join-Path $out $case.id
         New-Item -ItemType Directory -Path $casePath | Out-Null
@@ -162,7 +174,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Matrix response contrast failed structurally.' }
             $response = Get-Content -LiteralPath $responsePath -Raw | ConvertFrom-Json
             $responseRecord = [ordered]@{ check_id = $check.id; status = $response.status; checks = $response.checks; first_difference = $response.first_difference }
-            if ($matrix.schema_version -eq 2) {
+            if ($matrix.schema_version -ge 2) {
                 foreach ($name in @('required_mechanics', 'mechanics_predicate_availability', 'shared_pre_ending_mode_samples', 'shared_mechanics_predicate_samples', 'mechanics_observation_scope')) {
                     $responseRecord[$name] = $response.$name
                 }
@@ -200,7 +212,12 @@ try {
     Write-Output "Matrix evidence: $out"
     if (-not $passedAll) { throw 'Matrix gate remains open; all comparison and observation failures retained.' }
 } finally {
-    try { Restore-AxiomExperimentSnapshot $snapshot }
+    try {
+        Restore-AxiomExperimentSnapshot $snapshot
+        $preservation = Test-AxiomExperimentSnapshot $snapshot
+        [IO.File]::WriteAllText((Join-Path $out 'state-preservation.json'), ($preservation | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+        if (-not $preservation.all_preserved) { throw 'Experiment file byte/existence restoration did not match.' }
+    }
     finally {
         if ($priorExecutionState) {
             if (-not [AxiomMatrixPower]::SetThreadExecutionState($priorExecutionState)) {
