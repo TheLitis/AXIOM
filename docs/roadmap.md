@@ -17,7 +17,11 @@ The [initial native validation ledger](native-validation.md) retains failed exac
 
 A separate [mechanics matrix](native-mechanics-matrix.md) passed 56 completed attempts over 11 generated cases covering gravity inversion/return, size changes, five raw speed values and dual entry/exit. All 33 replay attempts agreed through terminal on 14 components; twelve mechanics-conditioned input-response controls passed, including separate P1 and active-P2 controls in dual. This verifies the declared constructions and recorded fields under the fixed Scheduler intervention; it does not close the complete M1 gate.
 
-Next, test richer mechanics and collision/trigger combinations, ordinary-input equivalence and interruptions, and measure configuration coverage, recording overhead and throughput before deriving timing windows.
+The [collision and trigger checkpoint](native-interactions.md) recorded 48 full-start attempts over 12 constructions, including 36 owned replays and six controlled variant pairs. All repeated cases agreed on 18 recorded components; 32 attempts completed and 16 died as declared. Selected native effect receipts and watched states passed the declared gates. A separate artifact audit reproduced all six variant comparisons at each of the three repetitions. The explicit delivery-context projection leaves unequal absolute native timestamps as diagnostics; it does not establish full native-time equality.
+
+The separate 12-attempt synthetic UI study witnessed planned queue delivery and matching selected dynamics, with all four UI repeat sets agreeing on 18 components. All twelve complete cross-route input-receipt comparisons failed because UI forwarded an additional initial P1 release. This measured mismatch remains part of the result; scheduled UI callbacks do not test Windows/device arrival.
+
+Next, resolve the observed input-delivery difference, test the Windows/device path, focus, reset and interruptions, broaden configuration/collider/trigger coverage, and measure recording overhead and native throughput before deriving timing windows. These checkpoints leave the full M1 gate open.
 
 ## First human benchmark
 

@@ -22,6 +22,10 @@ The [expanded fixture matrix](docs/native-fixture-matrix.md) passed **55 separat
 
 A separate [raw mechanics matrix](docs/native-mechanics-matrix.md) passed **56 completed native attempts across 11 generated cases** covering gravity inversion/return, size changes, five observed speed values and entry/exit of dual. All 33 replay attempts agreed through terminal on all 14 comparison components. Twelve controls established a selected input response under matching mechanics conditions in both sampled states, including separate P1 and active-P2 controls in dual. These are checked constructions under the fixed Scheduler intervention, not general coverage of those mechanics or calibrated difficulty.
 
+The [collision and trigger checkpoint](docs/native-interactions.md) recorded **48 full-start attempts across 12 constructions**: raised platforms, a slope, ceiling contact, Toggle, Move and a Spawn→Toggle chain, each with a paired variant. The 36 owned replays agreed within their cases on 18 recorded components; 32 total attempts completed and 16 died as declared. All six variant comparisons passed, and a separate artifact audit reproduced them across all three repetitions. Schema 4 retains contact flags, watched-object states and paired native receipts. Absolute delivery timestamps remain unequal diagnostics under the explicit `native-delivery-context-v1` comparison scope.
+
+A separate **12-attempt synthetic UI study** witnessed the scheduled Space callbacks, native queue processing and selected dynamics, but **none passed complete input-receipt equality** against the owned route: UI forwarded an additional initial P1 release. All four sets of UI repeats agreed on the 18 recorded components. Scheduled `UILayer` calls bypass Windows/device arrival; ordinary-input equivalence remains unestablished.
+
 | Available now | Evidence and limits |
 |---|---|
 | Raw level-string inspection | Exact source/decoded hashes, settings, object IDs, positions and unknown keys; no collider or trigger simulation |
@@ -34,6 +38,7 @@ A separate [raw mechanics matrix](docs/native-mechanics-matrix.md) passed **56 c
 | Native capture inspection/comparison | Strict integrity and identity checks; exact comparison of recorded replay subsets; files alone do not establish complete engine determinism |
 | Declared native fixture matrix | Generated level payloads and input plans, pre-ending mode requirements, exact repeated replay checks and owned-input response controls; [contract and evidence](docs/native-fixture-matrix.md) |
 | Raw mechanics capture and conditioned checks | Schema-3 gravity, size, speed and actual dual flag; schema-2 fixture sequences and input-response conditions in both sampled states; [mechanics contract and evidence](docs/native-mechanics-matrix.md) |
+| Collision, trigger and delivery observations | Schema-4 contact flags, watched objects, paired native effects and queue receipts; schema-3 fixture gates, controlled variants and a separate synthetic UI-route comparator; [contract and evidence](docs/native-interactions.md) |
 | Portable HTML and JSON | Interactive route selection, window/first-completion plots, source identity and interpretation limits; works offline |
 | Research framework | 64 proposed factors, telemetry design, baseline comparisons and a gated implementation roadmap |
 
@@ -67,9 +72,10 @@ axiom native-compare examples/native/synthetic-clock-a.json examples/native/synt
 axiom native-compare examples/native/synthetic-mechanics-a.json examples/native/synthetic-mechanics-b.json --json reports/native-mechanics-comparison.json
 axiom fixtures examples/native/fixture-matrix.json --json reports/fixture-specification.json
 axiom fixtures examples/native/mechanics-matrix.json --json reports/mechanics-specification.json
+axiom fixtures examples/native/interaction-matrix.json --json reports/interaction-specification.json
 ```
 
-All commands validate input; unknown evidence remains unknown. The native examples above are synthetic schema fixtures. The fixture catalogue declares generated geometry and intended checks; `fixture-check` and `fixture-response` assess separate supplied captures, without authenticating execution. See [import formats](docs/formats.md), [timing scenarios](docs/timing-format.md), [cohorts](docs/survival-format.md), [oracle ledgers](docs/oracle-format.md) and [native operation and acceptance](docs/native-adapter.md). Building the native mod requires a separate compiler/SDK setup; Python analysis remains dependency-free.
+All commands validate input; unknown evidence remains unknown. The native examples above are synthetic schema fixtures. The fixture catalogue declares generated geometry and intended checks; `fixture-check`, `fixture-response`, `fixture-variants` and `native-delivery-compare` assess supplied captures, without authenticating execution. See [import formats](docs/formats.md), [timing scenarios](docs/timing-format.md), [cohorts](docs/survival-format.md), [oracle ledgers](docs/oracle-format.md) and [native operation and acceptance](docs/native-adapter.md). Building the native mod requires a separate compiler/SDK setup; Python analysis remains dependency-free.
 
 ## What AR means
 
@@ -89,7 +95,7 @@ Physical feasibility, execution difficulty and learning difficulty remain separa
 
 ## Next scientific milestone
 
-Extend the checked mechanics matrix to richer combinations, collisions and triggers; test ordinary-input equivalence, complete environment coverage, interruptions, recording overhead and measured throughput. Establish the supported replay domain before deriving timing windows. Then test whether a calibrated section-success model improves predictions on unseen players against an independent-window baseline.
+Resolve the observed input-delivery difference and test the complete Windows-to-game path, focus, reset and interruption behavior. Extend coverage beyond the checked collider/trigger constructions and measure configuration coverage, recording overhead and native throughput. Establish the supported replay domain before deriving timing windows. Then test whether a calibrated section-success model improves predictions on unseen players against an independent-window baseline.
 
 Native integration is experimental; automatic window discovery, perception/learning models and real-level leaderboards remain **planned work**, with acceptance gates in the [roadmap](docs/roadmap.md). Geode, Frame Window Counter, NaNDL and the statistical/motor-control literature are prior work, documented with primary references in [research sources](docs/research-sources.md).
 
