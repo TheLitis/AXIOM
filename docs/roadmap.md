@@ -21,7 +21,9 @@ The [collision and trigger checkpoint](native-interactions.md) recorded 48 full-
 
 The separate 12-attempt synthetic UI study witnessed planned queue delivery and matching selected dynamics, with all four UI repeat sets agreeing on 18 components. All twelve complete cross-route input-receipt comparisons failed because UI forwarded an additional initial P1 release. This measured mismatch remains part of the result; scheduled UI callbacks do not test Windows/device arrival.
 
-Next, resolve the observed input-delivery difference, test the Windows/device path, focus, reset and interruptions, broaden configuration/collider/trigger coverage, and measure recording overhead and native throughput before deriving timing windows. These checkpoints leave the full M1 gate open.
+Two later native-clock manual attempts completed separately. The first recorded no keyboard callbacks; the restart recorded Space down/up outside command processing and their queue-to-player delivery on the next commands. The operator reported holding Space and clicking the left mouse button near the end. All additional receipts remain present; mouse entry and device origin are uninstrumented. A 54-check artifact audit reproduced the restarted observation without establishing full ordinary-input equivalence. See the [manual evidence ledger](native-interactions.md#operator-reported-manual-observations).
+
+Next, resolve the observed input-delivery difference, extend the manual observation to mouse-entry and Windows/device measurements, test focus, reset and interruptions, broaden configuration/collider/trigger coverage, and measure recording overhead and native throughput before deriving timing windows. These checkpoints leave the full M1 gate open.
 
 ## First human benchmark
 

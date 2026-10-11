@@ -1,12 +1,12 @@
-# Native collisions, trigger effects and synthetic UI delivery
+# Native collisions, trigger effects and input-delivery observations
 
 [Русская версия](native-interactions.ru.md) · [mechanics checkpoint](native-mechanics-matrix.md) · [adapter contract](native-adapter.md)
 
-This stage studies selected collision/contact state, changes to explicitly watched objects and a bounded in-engine input-delivery path. Native capture schema **4**, fixture catalogue schema **3** and the separate [delivery comparator](../src/axiom/equivalence.py) describe different contracts. They do not establish complete collision geometry, general trigger semantics, ordinary OS-input equivalence or human Axiom Rating.
+This stage studies selected collision/contact state, changes to explicitly watched objects, synthetic in-engine delivery and separate native-clock manual observations. Native capture schema **4**, fixture catalogue schema **3** and the separate [delivery comparator](../src/axiom/equivalence.py) describe different contracts. They do not establish complete collision geometry, general trigger semantics, ordinary OS-input equivalence or human Axiom Rating.
 
 ## Audited interactions and recorded delivery disagreement
 
-**The source-frozen interaction matrix, six paired variant results and confirming scheduled-UI study have been recorded and audited.** All 12 cross-route comparisons disagree on complete actual input receipts, although their six selected dynamics projections and scheduled queue-path checks agree. The audits independently recompute selected artifacts on the same host; they do not authenticate external engine execution. Manual-input qualification is not established. Construction probes and retained harness failures remain separate from the completed studies.
+**The source-frozen interaction matrix, six paired variant results and confirming scheduled-UI study have been recorded and audited.** All 12 cross-route comparisons disagree on complete actual input receipts, although their six selected dynamics projections and scheduled queue-path checks agree. Two separate completed native-clock observations now include one recorded keyboard press/release chain and operator-reported manual actions. The audits independently recompute selected artifacts on the same host; they do not authenticate external engine execution or OS/hardware origin. Construction probes and retained harness failures remain separate from the completed studies.
 
 | Recorded domain | Result and count |
 |---|---|
@@ -17,7 +17,8 @@ This stage studies selected collision/contact state, changes to explicitly watch
 | Preservation | All four experiment files restored by bytes and existence after the confirming matrix |
 | Scheduled UI | 12 fresh native attempts across four cases: nine completed and three died; four same-route repeat reports / eight comparison rows, all 18 components exact |
 | Cross-route delivery | 12 negative full-receipt verdicts against four reused owned-reference captures; six dynamics projections and the scheduled queue witness agree in all 12 |
-| User-operated observation | Two separate 300-second menu timeouts, no captures or native attempts; no human-input qualification |
+| User-operated observation | Two completed native-clock captures, one recorded Space press/release chain; separate operator statements, unknown native input provenance |
+| Historical manual windows | Two separate 300-second menu timeouts with no captures or native attempts, retained separately |
 
 The matrix at `reports/native/interactions-confirmed-95d961d0a3cc452eba4f7b3b65b40cb1/` recorded status `declared_matrix_recorded_subset_passed` at `2026-10-10T22:46:41.7373194Z`. Its `matrix-result.json` SHA-256 is `73e4db79bbb2e36e8bb76b5cef32446b60965e53373ccd53b2f3ef6b1317f66a`. Its `state-preservation.json` SHA-256 is `97b1a57b714910ad5bacd5b695cf1b4afc187c5b77326957a568ab510568b843`. The case gates and whole-trace comparison reports are recorded results; they do not establish unrecorded state determinism or M1 completion.
 
@@ -62,6 +63,30 @@ The same-host independent audit is `reports/audit-native-delivery-confirming-res
 
 All four experiment files were restored by bytes and existence; `state-preservation.json` SHA-256 is `f7c44cb0ac809135905547483d3ad36b946a625dd8b4bd91ff7cc0f3b3d612fa`. The temporary Windows system/display execution-state request was restored. Authentication, human authorship and ordinary OS-input equivalence remain unestablished.
 
+## Operator-reported manual observations
+
+Two later full-start observations are separate from the **48 matrix captures and 12 synthetic UI captures**. Both declare clock policy `native`, no clock intervention, driver `none`, an empty planned-input list, `replay_sha256: null`, and **unknown** input source/delivery provenance. They use evaluator `bfc71739c53721099f547e64945ee0f26ef85796`, the compiled collector/package/DLL identities in the table above, and native-clock environment SHA-256 `2a213ce34550df29c177d85c0f8164263c8f57bb25aa12b8b3099f0bccd9e9f6`. No synthetic UI comparison is applied to these observations.
+
+| Preserved observation directory under `reports/native/` | Capture SHA-256 | Selected recorded result |
+|---|---|---|
+| `manual-input-9e09e25431934dc4b3ea4a8ff9c39bf5/` | `72b754bfad20be6f13476a1e1c97367d205667777dbe933980a436f2dafbcfc9` | Completed at command 1658; two initial-release receipt rows and one queue-processing event; no Space keyboard callbacks |
+| `manual-input-a401f758dbcb4a66a73b2c0c731c33aa/` | `2d2afd351c4e8bccffe3300d41be219d0c2bd8862f85ec0978d0f724c93a48de` | Completed at command 1658; ten actual input-receipt rows, seven delivery events and five queue batches; one Space press/release chain |
+
+The first window launched at `2026-10-11T00:57:04.0517734Z` and recorded its result at `2026-10-11T00:58:55.8119443Z`. Its only actual input is the unknown-origin initial P1 release at command 1, with request and player-release rows. This establishes no keyboard press. Its `manual-result.json` SHA-256 is `743287b487a8ebeb7ac67c5558b1f674320b90b4acc7f96e53c0066c54c21e44`; all four experiment files were restored, with preservation SHA-256 `121ccc070f3576870d22e4600e1269e7f4a5df834cc21183dd817cb78f776c83`. Independent report `reports/audit-native-manual-first-result-9e09e254.json` has SHA-256 `6d0576efcb3fd4300fa699751ad5fc90eec240ad3c084330cc1f3ba1cf576714`; its script SHA-256 is `bee9d2917a9b0bde795b8c9afaa67d354def5f8aa901824df721c02b6c127cf1`.
+
+The restarted window launched at `2026-10-11T01:00:58.2917659Z` and recorded its result at `2026-10-11T01:03:19.7162961Z`. Both Space callbacks use key code 32, occur **outside `processCommands`**, and have null update/Scheduler membership. Each appends its exact button/timestamp to the native queue; a later processor removes it and encloses the matching request and successful native player callback:
+
+| Keyboard entry | Later queue processing and actual P1/button-1 delivery | Raw incoming timestamp / sampled layer timestamp |
+|---|---|---|
+| `UILayer::keyDown`, last command 149 | Command 150, update 391, Scheduler 392: request/push, native return true | `194004.2185938` / `194004.2171195` |
+| `UILayer::keyUp`, last command 529 | Command 530, update 770, Scheduler 771: request/release, native return true | `194005.7985367` / `194005.798027` |
+
+Incoming timestamps differ from the last sampled layer timestamp and remain exact in their queued items. This is a recorded native-clock observation, not an error or the synthetic route's sampled-timestamp contract. The complete stream also retains the initial release at command 1 and a further queued press/release at commands **1349/1415**: six additional actual receipt rows. No mouse-entry callback is instrumented. End animation begins at 1418, terminal completion is at 1658; the capture retains 1659 trace rows, 1897 updates and 1899 Scheduler calls. These counters establish recorded order, not calibrated external arrival or continuous physical timing.
+
+Separate user statements were **«Нажал всё»** and **«я зажал пробел и под конец кликнул лкм»**. They support operator-reported Space and left-mouse actions; the later queued pair is consistent with that report, without observed mouse-entry attribution. `operator-statement.json` SHA-256 is `44787e32e270007d9f5f3a21e2ab1ca5eea8da1f14984e05136ed654274e58a0`. The statements do not change native provenance or authenticate hardware/OS origin.
+
+The restart's `manual-result.json` SHA-256 is `3d4fd2d018b0a2d0dcadd8922faaee2a1831d0257f94939df250210d99b87aef`, inspection SHA-256 is `3a3375d4e0ae1ec661cb0cd2351a3372fbe9584374abd1f934c86cd93fa5b98d`, and preservation SHA-256 is `5d6b26d0df1db943a2827cafdd7e8269496f9ad15eb276552a6b23e6ca408374`; all four experiment files were restored. Independent report `reports/audit-native-manual-restart-result-a401f758-with-operator-statements.json` has SHA-256 `f63bf1a28194b31cfc916b0e6beead5ac47ab3104265959c8a287fdbccdeedb8`; script `reports/audit-native-manual-restart.py` has SHA-256 `1fdde8537480e93e60fe49ef187044fced85bb93c28c460f8110a85daf452ecd`. Its **54 artifact checks, zero failures** bind the statements and preserved records, including the earlier 48-check report SHA-256 `c2fed2aad7e6ddcbbfb4c526470f0765c2193cef4b13226ee12a019262cb24d1`. These are offline artifact checks, not new native attempts, unit tests, external replication, ordinary OS-input equivalence or M1 completion.
+
 ## Development and retained failed attempts
 
 The retained development directory is `reports/native/interaction-probes-f70221d06ae64c4b9be0fabc1cb5b2f2/`. A raised-platform capture completed and sampled P1 at command 219 with `y: 135`, `is_on_ground: true`, `is_on_slope: false`; its flush-platform control also completed. Slope captures supplied selected contact observations. The low-ceiling attempt died at command 150, while its high-ceiling control completed at command 734. The toggle-positive attempt completed, while its control died at command 217. These are development observations under their recorded identities, not final repeat or paired-control verdicts.
@@ -76,7 +101,7 @@ The first confirming UI preflight is retained at `reports/native/delivery-confir
 
 The user-operated attempt at `reports/native/manual-input-c1178eb947fb4e09bb6fa651dd5be011/` timed out after **300 seconds** while the menu waited for **Start AXIOM Test**. No start action or capture was recorded. All four experiment files were restored. No completed manual-input qualification or user-authorship statement follows from that timeout.
 
-The separate fresh window at `reports/native/manual-input-ceb33822436641a884d7cab8cf3fa02f/` launched at `2026-10-10T22:54:24.3285780Z` and reached menu readiness at `2026-10-10T22:54:28Z`. It also timed out after **300 seconds**, exiting with code 1. No **Start AXIOM Test** action, capture, inspection or `manual-result.json` was recorded; this adds no native attempt. It used evaluator `d5b1245bafa15fc45769c6e251f3a75bb4af7611` and the same collector package as the completed UI study. All four experiment files were restored; its `state-preservation.json` SHA-256 is `0b0f81dddb8e91690605c2d2f38bd00645f4a7531ca91eac19bbbcea0205359b`. No user completion statement was received. The two menu timeouts remain separate from the 48 matrix and 12 UI captures; manual/human-input qualification remains open.
+The separate fresh window at `reports/native/manual-input-ceb33822436641a884d7cab8cf3fa02f/` launched at `2026-10-10T22:54:24.3285780Z` and reached menu readiness at `2026-10-10T22:54:28Z`. It also timed out after **300 seconds**, exiting with code 1. No **Start AXIOM Test** action, capture, inspection or `manual-result.json` was recorded; this adds no native attempt. It used evaluator `d5b1245bafa15fc45769c6e251f3a75bb4af7611` and the same collector package as the completed UI study. All four experiment files were restored; its `state-preservation.json` SHA-256 is `0b0f81dddb8e91690605c2d2f38bd00645f4a7531ca91eac19bbbcea0205359b`. No user completion statement was received for this window. The two historical menu timeouts supply no manual capture; the later completed observations above remain separate.
 
 ## What schema 4 records
 
@@ -238,7 +263,7 @@ The separate [manual-input runner](../scripts/run-native-manual-input.ps1) launc
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-native-manual-input.ps1 -GameDirectory 'C:\path\to\Geometry Dash' -TimeoutSeconds 180
 ```
 
-This route supplies no replay schedule or synthetic OS input. The collector must report clock policy `native`, driver `none`, delivery provenance `unknown` and `input_source: unknown`. Native callbacks and queue receipts can show what reached the selected engine entries. A separate user statement can describe who operated the test; that statement does not change the capture's unknown provenance or authenticate hardware origin. A timeout, abort, empty receipt stream or valid observation without a user statement cannot establish a completed human-input qualification. Manual observations have their own challenge and environment identity and are not pooled with fixed-scheduler paired results. **No manual observation has yet been qualified in this ledger.**
+This route supplies no replay schedule or synthetic OS input. The collector must report clock policy `native`, driver `none`, delivery provenance `unknown` and `input_source: unknown`. Native callbacks and queue receipts can show what reached the selected engine entries. A separate user statement can describe who operated the test; that statement does not change the capture's unknown provenance or authenticate hardware origin. A timeout, abort or initial-release-only stream supplies no keyboard press evidence. Manual observations have their own challenge and environment identity and are not pooled with fixed-scheduler paired results. **One native-clock Space press/release chain and separate operator statements are now recorded above; ordinary OS/device equivalence remains unestablished.**
 
 ## Preserving attempts
 

@@ -12,6 +12,8 @@ The 2026-10-11 [collision and trigger checkpoint](native-interactions.md) adds 4
 
 Twelve additional synthetic UI attempts witnessed the planned native queue path and matching selected dynamics, but every complete input-receipt comparison with the owned route failed on an additional initial P1 release. This supplies a delivery diagnostic to resolve; it does not qualify the external Windows/device path.
 
+A subsequent operator-reported manual observation under native clocks recorded Space down/up outside command processing and their queue-to-player delivery on the next commands; a separate artifact audit passed 54 checks. The preceding completed manual run recorded no keyboard callbacks. All extra receipts are retained, including a later pair consistent with the reported left mouse click, whose entry is not instrumented. These observations advance the [manual evidence ledger](native-interactions.md#operator-reported-manual-observations); device-origin authentication, full ordinary-input equivalence and M1 remain open.
+
 ## 1. Final product contract
 
 For an exact level revision, verified execution environment, information/practice protocol and specified player or reference population, AXIOM should produce:

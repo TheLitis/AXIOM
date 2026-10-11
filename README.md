@@ -26,6 +26,8 @@ The [collision and trigger checkpoint](docs/native-interactions.md) recorded **4
 
 A separate **12-attempt synthetic UI study** witnessed the scheduled Space callbacks, native queue processing and selected dynamics, but **none passed complete input-receipt equality** against the owned route: UI forwarded an additional initial P1 release. All four sets of UI repeats agreed on the 18 recorded components. Scheduled `UILayer` calls bypass Windows/device arrival; ordinary-input equivalence remains unestablished.
 
+A later **operator-reported manual run under native clocks** recorded Space down/up outside command processing, followed by native queue consumption and successful player push/release on the next commands. All ten actual receipts remain visible, including the initial release and a further press/release consistent with the operator's reported left mouse click; the mouse entry itself is not instrumented. A separate artifact audit passed 54 checks. This records a keyboard delivery observation, while device-origin authentication and full ordinary-input equivalence remain open. The preceding completed run recorded no keyboard callbacks and is retained separately. [Manual evidence and scope](docs/native-interactions.md#operator-reported-manual-observations).
+
 | Available now | Evidence and limits |
 |---|---|
 | Raw level-string inspection | Exact source/decoded hashes, settings, object IDs, positions and unknown keys; no collider or trigger simulation |
