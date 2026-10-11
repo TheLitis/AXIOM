@@ -29,8 +29,8 @@ constexpr size_t MaxQueue = 256;
 constexpr size_t MaxGroups = 64;
 constexpr size_t MaxWatches = 8;
 constexpr char Policy[] = "process-commands-scheduled-delivery-v2";
-enum class ClockPolicy { Native, FixedBase60, FixedScheduler240 };
-enum class InputDriver { None, Owned, UiCallback };
+enum class ClockPolicy { Native, FixedBase60, FixedScheduler240, RecordedScheduler };
+enum class InputDriver { None, Owned, UiCallback, ProcessingEntry };
 ClockPolicy clockPolicy = ClockPolicy::Native;
 InputDriver inputDriver = InputDriver::Owned;
 std::vector<int> watchGroups;
@@ -46,7 +46,7 @@ std::filesystem::path executablePath();
 void selectClockPolicy() {
     auto choice = Mod::get()->getLaunchArgument("clock-policy").value_or("native");
     if (choice == "native") return;
-    if (choice != "fixed-base-60" && choice != "fixed-scheduler-240") {
+    if (choice != "fixed-base-60" && choice != "fixed-scheduler-240" && choice != "recorded-scheduler-stream") {
         clockSelectionError = "Unsupported clock-policy launch argument";
         return;
     }
@@ -54,18 +54,22 @@ void selectClockPolicy() {
     // They never activate in the ordinary game, even if settings enable capture.
     if (_wcsicmp(executablePath().filename().c_str(), L"AXIOMSandbox.exe") != 0 ||
             !Loader::get()->getLaunchFlag("axiom-sandbox")) {
-        clockSelectionError = "Fixed clock requires AXIOMSandbox.exe and axiom-sandbox launch guard";
+        clockSelectionError = "Clock intervention requires AXIOMSandbox.exe and axiom-sandbox launch guard";
         return;
     }
-    clockPolicy = choice == "fixed-base-60" ? ClockPolicy::FixedBase60 : ClockPolicy::FixedScheduler240;
+    clockPolicy = choice == "fixed-base-60" ? ClockPolicy::FixedBase60 :
+        choice == "fixed-scheduler-240" ? ClockPolicy::FixedScheduler240 : ClockPolicy::RecordedScheduler;
 }
 void selectDelivery() {
     auto choice = Mod::get()->getLaunchArgument("input-driver").value_or("owned-pre-command");
-    if (choice != "owned-pre-command" && choice != "scheduled-ui-callback")
+    if (choice != "owned-pre-command" && choice != "scheduled-ui-callback" && choice != "owned-processing-entry")
         throw std::runtime_error("Unsupported input-driver launch argument");
-    inputDriver = choice == "scheduled-ui-callback" ? InputDriver::UiCallback : InputDriver::Owned;
+    inputDriver = choice == "scheduled-ui-callback" ? InputDriver::UiCallback :
+        choice == "owned-processing-entry" ? InputDriver::ProcessingEntry : InputDriver::Owned;
+    if ((inputDriver == InputDriver::ProcessingEntry) != (clockPolicy == ClockPolicy::RecordedScheduler))
+        throw std::runtime_error("Recorded scheduler and owned processing-entry must be selected together");
     auto groups = Mod::get()->getLaunchArgument("watch-groups").value_or("");
-    if (inputDriver == InputDriver::UiCallback || !groups.empty()) {
+    if (inputDriver == InputDriver::UiCallback || inputDriver == InputDriver::ProcessingEntry || !groups.empty()) {
         if (_wcsicmp(executablePath().filename().c_str(), L"AXIOMSandbox.exe") != 0 ||
                 !Loader::get()->getLaunchFlag("axiom-sandbox"))
             throw std::runtime_error("UI callback/watch experiment requires guarded AXIOMSandbox.exe");
@@ -184,9 +188,10 @@ Json environment() {
         {"input_policy", Policy}, {"clocks", matjson::makeObject({
             {"unit", "processCommands_call_index"}, {"dt_unit", "seconds_as_passed_to_hook"},
             {"hardware_arrival", "unknown"}, {"render_cadence", "not_captured"},
-            {"clock_policy", clockPolicy == ClockPolicy::Native ? "native" : clockPolicy == ClockPolicy::FixedBase60 ? "fixed-base-60" : "fixed-scheduler-240"},
+            {"clock_policy", clockPolicy == ClockPolicy::Native ? "native" : clockPolicy == ClockPolicy::FixedBase60 ? "fixed-base-60" :
+                clockPolicy == ClockPolicy::FixedScheduler240 ? "fixed-scheduler-240" : "recorded-scheduler-stream"},
             {"intervention_hook", clockPolicy == ClockPolicy::Native ? "none" : clockPolicy == ClockPolicy::FixedBase60 ? "GJBaseGameLayer::update" : "CCScheduler::update"},
-            {"step_numerator", clockPolicy == ClockPolicy::Native ? 0 : 1},
+            {"step_numerator", clockPolicy == ClockPolicy::Native || clockPolicy == ClockPolicy::RecordedScheduler ? 0 : 1},
             {"step_denominator", clockPolicy == ClockPolicy::FixedBase60 ? 60 : clockPolicy == ClockPolicy::FixedScheduler240 ? 240 : 1},
             {"intervention_scope", "guarded-sandbox-process"},
             {"update_unit", "GJBaseGameLayer::update_call_index"},
@@ -254,6 +259,23 @@ Json entity(GameObject* object) {
         {"runtime_unique_id", object->m_uniqueID}, {"group_ids", list}});
 }
 struct ReplayEvent { uint64_t command; int player; int button; bool pressed; };
+struct SchedulerReplay {
+    float delivered;
+    uint64_t commandBefore;
+    uint64_t commandAfter;
+    size_t updateCount;
+    Json phaseBefore;
+    Json phaseAfter;
+};
+struct ProcessingBatch {
+    uint64_t command;
+    size_t updateSequence;
+    size_t schedulerSequence;
+    float dt;
+    bool clear;
+    size_t firstInput;
+    size_t endInput;
+};
 uint64_t integer(Json const& value, uint64_t minimum, uint64_t maximum) {
     if (!value.isExactlyInt() && !value.isExactlyUInt()) throw std::runtime_error("Replay integer required");
     auto result = value.asUInt();
@@ -269,14 +291,14 @@ bool digest(std::string const& text) {
 }
 // Bound parser recursion before calling the SDK parser, and reject duplicate
 // object keys instead of allowing ambiguous replay plans to overwrite values.
-void checkJsonSafety(std::string const& raw) {
+void checkJsonSafety(std::string const& raw, size_t tokenLimit = 50000) {
     struct Container { bool object; bool expectsKey; std::set<std::string> keys; };
     std::vector<Container> stack;
     size_t tokens = 0;
     for (size_t i = 0; i < raw.size(); ++i) {
         char c = raw[i];
         if (c == '"') {
-            if (++tokens > 50000) throw std::runtime_error("Replay JSON token budget exceeded");
+            if (++tokens > tokenLimit) throw std::runtime_error("Replay JSON token budget exceeded");
             auto start = i++;
             for (; i < raw.size(); ++i) {
                 if (raw[i] == '\\') { if (++i == raw.size()) throw std::runtime_error("Truncated JSON escape"); }
@@ -291,7 +313,7 @@ void checkJsonSafety(std::string const& raw) {
                 stack.back().expectsKey = false;
             }
         } else if (c == '{' || c == '[') {
-            if (++tokens > 50000) throw std::runtime_error("Replay JSON token budget exceeded");
+            if (++tokens > tokenLimit) throw std::runtime_error("Replay JSON token budget exceeded");
             if (stack.size() >= 64) throw std::runtime_error("Replay JSON nesting exceeds 64");
             stack.push_back({c == '{', c == '{', {}});
         } else if (c == '}' || c == ']') {
@@ -299,7 +321,7 @@ void checkJsonSafety(std::string const& raw) {
             stack.pop_back();
         } else if (c == ',' && !stack.empty() && stack.back().object) stack.back().expectsKey = true;
         else if ((c >= '0' && c <= '9') || c == '-' || c == 't' || c == 'f' || c == 'n') {
-            if (++tokens > 50000) throw std::runtime_error("Replay JSON token budget exceeded");
+            if (++tokens > tokenLimit) throw std::runtime_error("Replay JSON token budget exceeded");
             while (i + 1 < raw.size() && raw[i + 1] != ',' && raw[i + 1] != '}' && raw[i + 1] != ']' &&
                 raw[i + 1] != ' ' && raw[i + 1] != '\t' && raw[i + 1] != '\r' && raw[i + 1] != '\n') ++i;
         }
@@ -310,6 +332,19 @@ void onlyKeys(Json const& value, std::set<std::string> const& keys) {
     if (!value.isObject()) throw std::runtime_error("Replay object required");
     for (auto const& entry : value) if (!keys.contains(entry.getKey().value())) throw std::runtime_error("Unknown replay field");
     if (value.size() != keys.size()) throw std::runtime_error("Missing replay field");
+}
+float replayDt(Json const& value) {
+    if (!value.isNumber()) throw std::runtime_error("Recorded replay dt must be a number");
+    auto raw = checked(value.asDouble().unwrap());
+    auto result = static_cast<float>(raw);
+    if (raw < 0 || raw > 60 || static_cast<double>(result) != raw)
+        throw std::runtime_error("Recorded replay dt must round-trip exactly through float32 in 0..60");
+    return result;
+}
+void replayPhase(Json const& value) {
+    onlyKeys(value, {"level_end_animation_started", "has_completed_level"});
+    if (!value["level_end_animation_started"].isBool() || !value["has_completed_level"].isBool())
+        throw std::runtime_error("Recorded replay phase booleans required");
 }
 struct Run {
     GJBaseGameLayer* layer;
@@ -333,6 +368,11 @@ struct Run {
     std::vector<std::pair<int, GameObject*>> watches;
     std::vector<ReplayEvent> planned;
     size_t next = 0;
+    std::vector<SchedulerReplay> cadence;
+    std::vector<ProcessingBatch> batches;
+    size_t nextCadence = 0;
+    size_t nextBatch = 0;
+    std::optional<uint64_t> processedBatchCommand;
     explicit Run(GJBaseGameLayer* owner) : layer(owner) { layer->retain(); }
     ~Run() { for (auto const& watch : watches) watch.second->release(); layer->release(); }
     Json& attempt() { return document["attempt"]; }
@@ -495,7 +535,7 @@ struct Run {
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
         attempt()["inputs"].push(matjson::makeObject({{"sequence", sequence++}, {"command_index", command},
             {"player", player}, {"button", button}, {"pressed", pressed}, {"phase", phase},
-            {"source", driver == InputDriver::Owned ? "replay" : "observed"}, {"native_return", returned},
+            {"source", driver == InputDriver::Owned || driver == InputDriver::ProcessingEntry ? "replay" : "observed"}, {"native_return", returned},
             {"in_command", inCommand}, {"update_sequence", membership(updates)},
             {"scheduler_sequence", membership(schedulers)}, {"wall_time_ns", elapsed}}));
     }
@@ -521,6 +561,80 @@ struct Run {
             {"scheduler_sequence", membership(schedulers)}});
         terminalSnapshotReady = true;
     }
+    void loadRecordedSchedule(Json const& data) {
+        if (!digest(string(data["source_capture_sha256"])) || !digest(string(data["source_environment_sha256"])))
+            throw std::runtime_error("Recorded replay source digests required");
+        if (canonical(data["target_collector"]) != canonical(document["collector"]))
+            throw std::runtime_error("Recorded replay target collector mismatch");
+        auto const& rows = data["scheduler_updates"];
+        if (!rows.isArray() || rows.size() == 0 || rows.size() > MaxCommands)
+            throw std::runtime_error("Recorded replay scheduler stream missing or exceeds limit");
+        std::vector<size_t> updateOffsets;
+        size_t totalUpdates = 0;
+        uint64_t previousCommand = 0;
+        for (auto const& row : rows) {
+            onlyKeys(row, {"sequence", "delivered_dt_seconds", "command_index_before", "command_index_after",
+                "update_count", "phase_before", "phase_after"});
+            if (integer(row["sequence"], 0, MaxCommands - 1) != cadence.size())
+                throw std::runtime_error("Recorded replay scheduler sequence is not contiguous");
+            auto before = integer(row["command_index_before"], 0, MaxCommands);
+            auto after = integer(row["command_index_after"], before, MaxCommands);
+            if (before != previousCommand) throw std::runtime_error("Recorded replay scheduler command spans are not contiguous");
+            previousCommand = after;
+            auto count = integer(row["update_count"], 0, MaxCommands);
+            updateOffsets.push_back(totalUpdates);
+            if (count > MaxCommands - totalUpdates) throw std::runtime_error("Recorded replay update count exceeds limit");
+            totalUpdates += count;
+            replayPhase(row["phase_before"]); replayPhase(row["phase_after"]);
+            cadence.push_back({replayDt(row["delivered_dt_seconds"]), before, after, static_cast<size_t>(count),
+                row["phase_before"], row["phase_after"]});
+        }
+        auto const& sourceBatches = data["processing_batches"];
+        if (!sourceBatches.isArray() || sourceBatches.size() == 0 || sourceBatches.size() > MaxEvents)
+            throw std::runtime_error("Recorded replay processing batches missing or exceed limit");
+        size_t inputIndex = 0;
+        uint64_t previousBatchCommand = 0;
+        std::optional<uint64_t> previousDelivery;
+        std::optional<uint64_t> previousSourceInput;
+        for (auto const& row : sourceBatches) {
+            onlyKeys(row, {"source_delivery_sequence", "command_index", "update_sequence", "scheduler_sequence",
+                "dt_seconds", "clear_input_queue", "inputs"});
+            auto sourceDelivery = integer(row["source_delivery_sequence"], 0, MaxEvents - 1);
+            auto batchCommand = integer(row["command_index"], 1, MaxCommands);
+            if ((previousDelivery && sourceDelivery <= *previousDelivery) || batchCommand <= previousBatchCommand)
+                throw std::runtime_error("Recorded replay processing batches must be ordered with distinct commands");
+            previousDelivery = sourceDelivery;
+            previousBatchCommand = batchCommand;
+            auto update = integer(row["update_sequence"], 0, MaxCommands - 1);
+            auto scheduler = integer(row["scheduler_sequence"], 0, cadence.size() - 1);
+            auto const& expected = cadence[scheduler];
+            if (batchCommand <= expected.commandBefore || batchCommand > expected.commandAfter ||
+                    update < updateOffsets[scheduler] || update >= updateOffsets[scheduler] + expected.updateCount)
+                throw std::runtime_error("Recorded replay batch lies outside declared update/scheduler grouping");
+            if (!row["clear_input_queue"].isBool()) throw std::runtime_error("Recorded replay clear-input flag required");
+            auto const& batchInputs = row["inputs"];
+            if (!batchInputs.isArray() || batchInputs.size() == 0 || batchInputs.size() > 4000)
+                throw std::runtime_error("Recorded replay processing batch inputs missing or exceed limit");
+            auto firstInput = inputIndex;
+            for (auto const& entry : batchInputs) {
+                onlyKeys(entry, {"source_input_sequence", "player", "button", "pressed"});
+                auto sourceInput = integer(entry["source_input_sequence"], 0, MaxInputs - 1);
+                if (previousSourceInput && sourceInput <= *previousSourceInput)
+                    throw std::runtime_error("Recorded replay source request sequences must increase");
+                previousSourceInput = sourceInput;
+                if (!entry["pressed"].isBool() || inputIndex >= planned.size())
+                    throw std::runtime_error("Recorded replay batch does not match flat input plan");
+                auto const& flat = planned[inputIndex++];
+                if (flat.command != batchCommand || flat.player != integer(entry["player"], 1, 2) ||
+                        flat.button != integer(entry["button"], 1, 3) || flat.pressed != entry["pressed"].asBool().unwrap())
+                    throw std::runtime_error("Recorded replay batch does not match flat input plan");
+            }
+            batches.push_back({batchCommand, static_cast<size_t>(update), static_cast<size_t>(scheduler),
+                replayDt(row["dt_seconds"]), row["clear_input_queue"].asBool().unwrap(), firstInput, inputIndex});
+        }
+        if (inputIndex != planned.size()) throw std::runtime_error("Recorded replay batches do not contain every flat input");
+        attempt()["replay_bridge"] = data;
+    }
     void loadReplay(std::string const& levelHash, std::string const& envHash) {
         std::ifstream stream(Mod::get()->getSaveDir() / "replay.json", std::ios::binary);
         if (!stream) throw std::runtime_error("Cannot read replay.json");
@@ -528,13 +642,20 @@ struct Run {
         stream.read(raw.data(), raw.size());
         raw.resize(stream.gcount());
         if (raw.size() > MaxBytes || (!stream.eof() && !stream)) throw std::runtime_error("Replay exceeds limit or read failed");
-        checkJsonSafety(raw);
+        bool bridge = driver == InputDriver::ProcessingEntry;
+        // A bounded recorded cadence has more keys than a simple input plan.
+        // Keep the legacy token budget for every existing delivery route.
+        checkJsonSafety(raw, bridge ? 1000000 : 50000);
         auto parsed = Json::parse(raw);
         if (!parsed) throw std::runtime_error("Invalid replay JSON");
         auto data = parsed.unwrap();
-        onlyKeys(data, {"schema_version", "kind", "clock", "level_sha256", "environment_sha256", "inputs"});
-        if (!data.isObject() || integer(data["schema_version"], 1, 1) != 1 || string(data["kind"]) != "native_replay" ||
-            string(data["clock"]) != "processCommands_call_index") throw std::runtime_error("Unsupported replay format/clock");
+        if (bridge) onlyKeys(data, {"schema_version", "kind", "clock", "level_sha256", "environment_sha256", "target_collector",
+            "source_capture_sha256", "source_environment_sha256", "scheduler_updates", "processing_batches", "inputs"});
+        else onlyKeys(data, {"schema_version", "kind", "clock", "level_sha256", "environment_sha256", "inputs"});
+        if (integer(data["schema_version"], bridge ? 2 : 1, bridge ? 2 : 1) != (bridge ? 2 : 1) ||
+            string(data["kind"]) != (bridge ? "native_recorded_replay" : "native_replay") ||
+            string(data["clock"]) != (bridge ? "recorded_scheduler_stream" : "processCommands_call_index"))
+            throw std::runtime_error("Unsupported replay format/clock");
         auto target = string(data["level_sha256"]);
         if (!digest(target) || target != levelHash) throw std::runtime_error("Replay level hash mismatch");
         auto expectedEnvironment = string(data["environment_sha256"]);
@@ -552,6 +673,7 @@ struct Run {
             if (driver == InputDriver::UiCallback && (planned.back().player != 1 || planned.back().button != 1))
                 throw std::runtime_error("Scheduled UI callback supports only player1/button1");
         }
+        if (bridge) loadRecordedSchedule(data);
         attempt()["replay_sha256"] = sha(raw);
         attempt()["planned_inputs"] = data["inputs"];
     }
@@ -636,6 +758,8 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
     if (!option("capture-enabled", "capture") && !option("replay-enabled", "replay")) return;
     if (Loader::get()->getVersion() != VersionInfo(5, 8, 2)) { log::error("AXIOM capture requires Geode 5.8.2"); return; }
     try {
+        if (clockPolicy == ClockPolicy::RecordedScheduler && !option("replay-enabled", "replay"))
+            throw std::runtime_error("Recorded scheduler stream requires replay mode");
         auto env = environment();
         auto envHash = sha(canonical(env));
         auto levelRaw = std::string(layer->m_level->m_levelString);
@@ -647,7 +771,7 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
         active->driver = active->replay ? inputDriver : InputDriver::None;
         auto driver = active->driver;
         active->document = matjson::makeObject({
-            {"schema_version", 5}, {"kind", "native_capture"},
+            {"schema_version", driver == InputDriver::ProcessingEntry ? 6 : 5}, {"kind", "native_capture"},
             {"provenance", matjson::makeObject({{"origin", "native-engine-capture"}, {"independently_verified", false}, {"state_completeness", "selected_fields_only"}})},
             {"collector", matjson::makeObject({{"id", "axiom.native-capture"}, {"version", "0.1.0"},
                 {"source_commit", AXIOM_SOURCE_COMMIT}, {"source_tree_sha256", AXIOM_SOURCE_TREE_SHA256},
@@ -665,10 +789,12 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
                 std::chrono::system_clock::now().time_since_epoch()).count()) + "-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(++runId)}, {"start_kind", startKind},
                 {"input_source", active->replay ? "replay" : "unknown"}, {"replay_sha256", nullptr},
                 {"input_delivery", matjson::makeObject({
-                    {"driver", driver == InputDriver::None ? "none" : driver == InputDriver::Owned ? "owned-pre-command" : "scheduled-ui-callback"},
+                    {"driver", driver == InputDriver::None ? "none" : driver == InputDriver::Owned ? "owned-pre-command" :
+                        driver == InputDriver::UiCallback ? "scheduled-ui-callback" : "owned-processing-entry"},
                     {"provenance", driver == InputDriver::None ? "unknown" : "synthetic-scheduled"},
-                    {"entry_point", driver == InputDriver::None ? Json(nullptr) : Json(driver == InputDriver::Owned ? "GJBaseGameLayer::handleButton" : "UILayer::keyDown/keyUp")},
-                    {"injection_phase", driver == InputDriver::None ? "none" : "processCommands-entry-before-original"},
+                    {"entry_point", driver == InputDriver::None ? Json(nullptr) : Json(driver == InputDriver::UiCallback ? "UILayer::keyDown/keyUp" : "GJBaseGameLayer::handleButton")},
+                    {"injection_phase", driver == InputDriver::None ? "none" : driver == InputDriver::ProcessingEntry ?
+                        "GJBaseGameLayer::processQueuedButtons-entry-before-original" : "processCommands-entry-before-original"},
                     {"timestamp_policy", driver == InputDriver::UiCallback ? "layer-m_timestamp" : "not-applicable"}})},
                 {"planned_inputs", Json::array()}, {"inputs", Json::array()}, {"blocked_inputs", Json::array()},
                 {"trace", Json::array()}, {"updates", Json::array()}, {"scheduler_updates", Json::array()},
@@ -691,6 +817,12 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
                 "Fixed clocks are isolated-process interventions; equivalence to ordinary gameplay is unverified.",
                 "Original update dt and wall timing are cadence diagnostics; delivered dt and call grouping are retained."})}});
         active->resolveWatches();
+        if (driver == InputDriver::ProcessingEntry) {
+            active->attempt()["replay_bridge"] = nullptr;
+            active->document["limitations"].push("Recorded scheduler replay delivers the source float32 dt stream once per actual scheduler callback; OS timing and hardware input are not replayed.");
+            active->document["limitations"].push("Processing-entry replay forwards recorded request channels, not inferred player actors; native queued requests are suppressed and retained without clearing the queue.");
+            active->document["limitations"].push("The source observed only nonempty processing entries; the first actual processing entry of each batch command must match the declared context/arguments, and duplicate or missing batch delivery is rejected.");
+        }
         active->trace(0, false, false);
         if (layer->m_isPlatformer) throw std::runtime_error("M1 supports classic levels only");
         if (active->replay) {
@@ -865,7 +997,7 @@ class $modify(AxiomBaseLayer, GJBaseGameLayer) {
     void handleButton(bool down, int button, bool isPlayer1) {
         auto run = axiom::active.get();
         if (run && run->layer == this && !run->terminal) {
-            if (run->driver == axiom::InputDriver::Owned) {
+            if (run->driver == axiom::InputDriver::Owned || run->driver == axiom::InputDriver::ProcessingEntry) {
                 // A one-shot permit admits only the scheduled wrapper entry.
                 // Native calls nested inside the original handler cannot reuse it.
                 bool scheduled = run->injecting;
@@ -882,10 +1014,39 @@ class $modify(AxiomBaseLayer, GJBaseGameLayer) {
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
     void processQueuedButtons(float dt, bool clearInputQueue) {
+        auto run = axiom::active.get();
+        bool bridge = run && run->layer == this && !run->terminal &&
+            run->driver == axiom::InputDriver::ProcessingEntry;
+        bool batchDue = bridge && run->inCommand && run->nextBatch < run->batches.size() &&
+            run->batches[run->nextBatch].command == run->command;
         axiom::DeliveryPair observation(this, "GJBaseGameLayer::processQueuedButtons", [=] {
             return matjson::makeObject({{"dt_seconds", axiom::checked(dt)},
                 {"clear_input_queue", clearInputQueue}});
-        }, !m_queuedButtons.empty());
+        }, batchDue || !m_queuedButtons.empty());
+        if (bridge && axiom::active.get() == run && !run->terminal && run->inCommand) {
+            try {
+                if (run->processedBatchCommand && *run->processedBatchCommand == run->command)
+                    throw std::runtime_error("Recorded replay encountered a second processing entry for a delivered batch command");
+                if (batchDue) {
+                    auto const batch = run->batches[run->nextBatch];
+                    if (run->updates.empty() || run->schedulers.empty() ||
+                            run->updates.back() != batch.updateSequence || run->schedulers.back() != batch.schedulerSequence ||
+                            dt != batch.dt || clearInputQueue != batch.clear || run->next != batch.firstInput)
+                        throw std::runtime_error("Recorded replay processing entry context/arguments differ from source batch");
+                    run->processedBatchCommand = run->command;
+                    ++run->nextBatch;
+                    // Keep the original queue intact. Each direct recorded request
+                    // gets one permit; subsequent native queue-body requests are
+                    // retained as suppressed diagnostics by handleButton.
+                    while (!run->terminal && run->next < batch.endInput) {
+                        auto input = run->planned[run->next++];
+                        run->injecting = true;
+                        GJBaseGameLayer::handleButton(input.pressed, input.button, input.player == 1);
+                        run->injecting = false;
+                    }
+                }
+            } catch (std::exception const& error) { axiom::fail(error.what()); }
+        }
         GJBaseGameLayer::processQueuedButtons(dt, clearInputQueue);
     }
     void triggerMoveCommand(EffectGameObject* object) {
@@ -944,7 +1105,10 @@ class $modify(AxiomBaseLayer, GJBaseGameLayer) {
             if (run->command > axiom::MaxCommands) throw std::runtime_error("Command trace limit reached");
             axiom::checked(dt);
             if (dt < 0 || dt > 60) throw std::runtime_error("Command dt outside 0..60 seconds");
-            if (run->replay) {
+            if (run->driver == axiom::InputDriver::ProcessingEntry && run->nextBatch < run->batches.size() &&
+                    run->batches[run->nextBatch].command < run->command)
+                throw std::runtime_error("Recorded replay processing batch entry was missed");
+            if (run->replay && run->driver != axiom::InputDriver::ProcessingEntry) {
                 while (!run->terminal && run->next < run->planned.size() && run->planned[run->next].command == run->command) {
                     auto event = run->planned[run->next++];
                     if (run->driver == axiom::InputDriver::Owned) {
@@ -981,9 +1145,23 @@ class $modify(AxiomScheduler, CCScheduler) {
         ++axiom::schedulerDepth;
         auto run = axiom::active.get();
         std::optional<size_t> row;
+        std::optional<size_t> cadenceIndex;
+        size_t updatesBefore = 0;
         auto delivered = axiom::clockPolicy == axiom::ClockPolicy::FixedScheduler240 ? 1.0f / 240.0f : dt;
         if (run && !run->terminal) {
-            try { row = run->enterUpdate("scheduler_updates", dt, delivered, run->schedulers); }
+            try {
+                if (run->driver == axiom::InputDriver::ProcessingEntry) {
+                    if (!run->schedulers.empty() || run->nextCadence >= run->cadence.size())
+                        throw std::runtime_error("Recorded scheduler stream exhausted or re-entrant scheduler call");
+                    auto const& expected = run->cadence[run->nextCadence];
+                    if (run->command != expected.commandBefore || axiom::canonical(axiom::phase(run->layer)) != axiom::canonical(expected.phaseBefore))
+                        throw std::runtime_error("Recorded scheduler entry command/phase differ from source");
+                    delivered = expected.delivered;
+                    cadenceIndex = run->nextCadence++;
+                    updatesBefore = run->attempt()["updates"].size();
+                }
+                row = run->enterUpdate("scheduler_updates", dt, delivered, run->schedulers);
+            }
             catch (std::exception const& error) { axiom::fail(error.what()); }
         }
         // Exactly one original call per actual scheduler callback. Cocos may
@@ -996,6 +1174,19 @@ class $modify(AxiomScheduler, CCScheduler) {
                 if (!run->schedulers.empty() && run->schedulers.back() == *row) run->schedulers.pop_back();
                 axiom::fail(error.what());
             }
+        }
+        if (cadenceIndex && axiom::active.get() == run) {
+            auto const& expected = run->cadence[*cadenceIndex];
+            if (run->command != expected.commandAfter || run->attempt()["updates"].size() - updatesBefore != expected.updateCount ||
+                    axiom::canonical(axiom::phase(run->layer)) != axiom::canonical(expected.phaseAfter))
+                axiom::fail("Recorded scheduler exit command/update grouping/phase differ from source");
+            // Completion may be nested inside the original scheduler callback.
+            // Qualify consumption only after its paired row has closed; retain
+            // any actual terminal event while marking mismatches incomplete.
+            if (run->terminal && run->terminalSnapshotReady && run->attempt()["terminal"]["outcome"].isString() &&
+                    axiom::string(run->attempt()["terminal"]["outcome"]) == "completed" &&
+                    (run->nextCadence != run->cadence.size() || run->nextBatch != run->batches.size() || run->next != run->planned.size()))
+                axiom::fail("Recorded replay completed before all cadence, batches and requests were consumed");
         }
         --axiom::schedulerDepth;
         axiom::flushPending();
