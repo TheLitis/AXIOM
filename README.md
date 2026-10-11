@@ -28,7 +28,7 @@ A separate **12-attempt synthetic UI study** witnessed the scheduled Space callb
 
 A later **operator-reported manual run under native clocks** recorded Space down/up outside command processing, followed by native queue consumption and successful player push/release on the next commands. All ten actual receipts remain visible, including the initial release and a further press/release consistent with the operator's reported left mouse click; that historical schema-4 capture has no mouse-entry instrumentation. A separate artifact audit passed 54 checks. This records a keyboard delivery observation, while device-origin authentication and full ordinary-input equivalence remain open. The preceding completed run recorded no keyboard callbacks and is retained separately. [Manual evidence and scope](docs/native-interactions.md#operator-reported-manual-observations).
 
-Current schema **5** adds paired gameplay touch begin/end/cancel observations and readable input-entry summaries. Existing keyboard hooks retain distinct raw codes for Space, W, Up, A, D, Left and Right; observing a key does not establish its gameplay effect. The implementation awaits fresh native verification, and right/middle mouse entry remains outside these hooks. [Input observation and manual test](docs/input-observation.md).
+Schema **5** is built and loaded. A fresh native-clock observation completed with **46 keyboard edges across Space, W, Up, A, D, Left, Right and S, plus five touch begin/end pairs**. A separate cube-flat replay group matched all 18 components; the preceding group failed delivery-context equality and remains retained. These observations do not authenticate device origin or establish inactive-P2 gameplay effects; right/middle mouse and native cancellation coverage remain unverified. [Input observations, repeat results and manual test](docs/input-observation.md).
 
 | Available now | Evidence and limits |
 |---|---|
@@ -43,7 +43,7 @@ Current schema **5** adds paired gameplay touch begin/end/cancel observations an
 | Declared native fixture matrix | Generated level payloads and input plans, pre-ending mode requirements, exact repeated replay checks and owned-input response controls; [contract and evidence](docs/native-fixture-matrix.md) |
 | Raw mechanics capture and conditioned checks | Schema-3 gravity, size, speed and actual dual flag; schema-2 fixture sequences and input-response conditions in both sampled states; [mechanics contract and evidence](docs/native-mechanics-matrix.md) |
 | Collision, trigger and delivery observations | Schema-4 contact flags, watched objects, paired native effects and queue receipts; schema-3 fixture gates, controlled variants and a separate synthetic UI-route comparator; [contract and evidence](docs/native-interactions.md) |
-| Keyboard and gameplay touch entries | Schema-5 raw key names, paired touch events and retained queue changes; native verification pending, unknown device provenance; [contract](docs/input-observation.md) |
+| Keyboard and gameplay touch entries | Schema-5 native key/touch entries, paired queue changes and bounded replay evidence; unknown device provenance; [contract](docs/input-observation.md) |
 | Portable HTML and JSON | Interactive route selection, window/first-completion plots, source identity and interpretation limits; works offline |
 | Research framework | 64 proposed factors, telemetry design, baseline comparisons and a gated implementation roadmap |
 

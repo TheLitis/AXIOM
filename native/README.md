@@ -6,9 +6,12 @@ complete engine determinism, infer collision geometry or estimate human limits.
 Build success and a loaded DLL do not establish gameplay capture or replay fidelity.
 
 Current source writes schema 5 with paired gameplay touch entries and readable
-keyboard/touch inspection. This extension awaits fresh native verification;
-historical schema-4 interaction/manual evidence remains separately identified.
-See [input observation](../docs/input-observation.md).
+keyboard/touch inspection. A fresh native-clock run completed with 46 keyboard
+edges across eight codes and five touch begin/end pairs. A separate cube-flat
+owned replay group matched all 18 components; its preceding delivery-context
+failure is retained. No cancellation was observed, and inactive-P2 gameplay
+effects and device origin remain unestablished. Historical schema-4 evidence
+remains separately identified. See [input observations and measured limits](../docs/input-observation.md).
 
 Build from the repository root with `scripts/build-native.ps1`. The script and
 CMake pin SDK commit `2a5fd87433da47d6bf07221774f0cbb25535ae08` and bindings
