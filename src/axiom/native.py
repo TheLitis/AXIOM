@@ -192,7 +192,9 @@ def _validate_update_stream(
         expected = (
             _float32(1 / clocks["step_denominator"]) if clocks["clock_policy"] == intervention else original
         )
-        if delivered != expected:
+        if delivered != expected and not (
+            scheduler and clocks["clock_policy"] == "recorded-scheduler-stream"
+        ):
             raise ValueError(f"{name} delivered dt does not match its declared clock policy")
         before = _int(row["command_index_before"], f"{name}.command_index_before", maximum=terminal_index)
         after = _int(
@@ -560,7 +562,7 @@ def _validate_paired_events(capture: dict, name: str) -> None:
                 _fields(args, "delivery.arguments", {"dt_seconds", "clear_input_queue"})
                 finite(args["dt_seconds"], "delivery.dt_seconds", minimum=0, maximum=60)
                 _bool(args["clear_input_queue"], "delivery.clear_input_queue")
-                if not row["queue_before"]:
+                if not row["queue_before"] and capture["schema_version"] != 6:
                     raise ValueError("Recorded processQueuedButtons must have a nonempty entry queue")
             else:
                 raise ValueError("Unsupported native delivery event")
@@ -607,6 +609,13 @@ def _validate_v4(capture: dict) -> None:
             "layer-m_timestamp",
         ),
     }
+    if capture["schema_version"] == 6:
+        expected["owned-processing-entry"] = (
+            "synthetic-scheduled",
+            "GJBaseGameLayer::handleButton",
+            "GJBaseGameLayer::processQueuedButtons-entry-before-original",
+            "not-applicable",
+        )
     driver = delivery["driver"]
     if not isinstance(driver, str) or driver not in expected:
         raise ValueError("Unsupported input_delivery driver")
@@ -621,7 +630,7 @@ def _validate_v4(capture: dict) -> None:
         event["player"] != 1 or event["button"] != 1 for event in attempt["planned_inputs"]
     ):
         raise ValueError("Scheduled UI delivery supports only player1/button1")
-    if driver != "owned-pre-command" and attempt["blocked_inputs"]:
+    if driver not in {"owned-pre-command", "owned-processing-entry"} and attempt["blocked_inputs"]:
         raise ValueError("Only owned-pre-command delivery suppresses native input")
     for row in [*attempt["trace"], attempt["terminal"]]:
         _watched_objects(row["watched_objects"], watches, "watched_objects")
@@ -650,8 +659,8 @@ def _validate_v4(capture: dict) -> None:
 def _load(path: str | Path) -> tuple[dict, str]:
     capture, source_sha256 = read_json(path)
     version = capture.get("schema_version") if isinstance(capture, dict) else None
-    if type(version) is not int or version not in {1, 2, 3, 4, 5}:
-        raise ValueError("native capture schema_version must be integer 1, 2, 3, 4 or 5")
+    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6}:
+        raise ValueError("native capture schema_version must be integer 1, 2, 3, 4, 5 or 6")
     rich = version >= 2
     extended = version >= 3
     contacts = version >= 4
@@ -780,6 +789,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
             "fixed-base-60": ("GJBaseGameLayer::update", 1, 60),
             "fixed-scheduler-240": ("CCScheduler::update", 1, 240),
         }
+        if version == 6:
+            policies = {"recorded-scheduler-stream": ("CCScheduler::update", 0, 1)}
         if not isinstance(policy, str) or policy not in policies:
             raise ValueError("Unsupported native clock policy")
         hook, numerator, denominator = policies[policy]
@@ -874,7 +885,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
         }
         | ({"blocked_inputs"} if environment["input_policy"] in {INPUT_POLICY, INPUT_POLICY_V4} else set())
         | ({"updates", "scheduler_updates", "phase_events"} if rich else set())
-        | ({"input_delivery", "delivery_events", "mechanic_events"} if contacts else set()),
+        | ({"input_delivery", "delivery_events", "mechanic_events"} if contacts else set())
+        | ({"replay_bridge"} if version == 6 else set()),
     )
     _text(attempt["id"], "attempt.id")
     if contacts:
@@ -991,7 +1003,10 @@ def _load(path: str | Path) -> tuple[dict, str]:
                 raise ValueError("Requested events cannot claim a native return")
         else:
             _bool(event["native_return"], "input.native_return")
-        owned_receipts = not contacts or attempt["input_delivery"].get("driver") == "owned-pre-command"
+        owned_receipts = not contacts or attempt["input_delivery"].get("driver") in {
+            "owned-pre-command",
+            "owned-processing-entry",
+        }
         if attempt["input_source"] == "replay" and owned_receipts and event["source"] != "replay":
             raise ValueError("Controlled replay recording contains an unexpected observed input")
         if contacts and not owned_receipts and event["source"] != "observed":
@@ -1071,7 +1086,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
     if terminal["outcome"] == "died" and not terminal_dead:
         raise ValueError("A native death requires a recorded dead player after destroyPlayer")
     if attempt["input_source"] == "replay" and (
-        not contacts or attempt["input_delivery"].get("driver") == "owned-pre-command"
+        not contacts
+        or attempt["input_delivery"].get("driver") in {"owned-pre-command", "owned-processing-entry"}
     ):
         expected_requests = [
             event for event in planned if event["command_index"] <= terminal["command_index"]
@@ -1087,6 +1103,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
             )
     if contacts:
         _validate_v4(capture)
+    if version == 6:
+        _validate_recorded_capture(capture)
     limitations = capture["limitations"]
     if not isinstance(limitations, list) or len(limitations) > 100:
         raise ValueError("limitations must be an array of at most 100 strings")
@@ -1098,6 +1116,219 @@ def _load(path: str | Path) -> tuple[dict, str]:
 def load_native_capture(path: str | Path) -> dict:
     """Validate a supplied terminal capture; this does not authenticate it."""
     return _load(path)[0]
+
+
+def validate_recorded_replay_plan(value: Any) -> dict:
+    """Validate the bounded, explicit schema-2 recorded-cadence intervention."""
+    plan = _fields(
+        value,
+        "recorded replay plan",
+        {
+            "schema_version",
+            "kind",
+            "clock",
+            "level_sha256",
+            "environment_sha256",
+            "source_capture_sha256",
+            "source_environment_sha256",
+            "target_collector",
+            "scheduler_updates",
+            "processing_batches",
+            "inputs",
+        },
+    )
+    if type(plan["schema_version"]) is not int or plan["schema_version"] != 2:
+        raise ValueError("Recorded replay plan requires schema_version 2")
+    if plan["kind"] != "native_recorded_replay" or plan["clock"] != "recorded_scheduler_stream":
+        raise ValueError("Unsupported recorded replay kind or clock")
+    for key in ("level_sha256", "environment_sha256", "source_capture_sha256", "source_environment_sha256"):
+        sha256(plan[key], f"recorded replay.{key}")
+    collector = _fields(
+        plan["target_collector"],
+        "target_collector",
+        {
+            "id",
+            "version",
+            "source_commit",
+            "source_tree_sha256",
+            "sdk_commit",
+            "bindings_commit",
+        },
+    )
+    for key, item in collector.items():
+        _text(item, f"target_collector.{key}")
+    sha256(collector["source_tree_sha256"], "target_collector.source_tree_sha256")
+    schedule = plan["scheduler_updates"]
+    if not isinstance(schedule, list) or not 1 <= len(schedule) <= MAX_UPDATE_RECORDS:
+        raise ValueError("Recorded scheduler stream must contain 1 to 20000 rows")
+    previous_after, update_total, update_ranges = 0, 0, []
+    for index, item in enumerate(schedule):
+        row = _fields(
+            item,
+            "recorded scheduler row",
+            {
+                "sequence",
+                "delivered_dt_seconds",
+                "command_index_before",
+                "command_index_after",
+                "update_count",
+                "phase_before",
+                "phase_after",
+            },
+        )
+        if _int(row["sequence"], "recorded scheduler.sequence") != index:
+            raise ValueError("Recorded scheduler sequence must start at zero and be contiguous")
+        dt = finite(row["delivered_dt_seconds"], "recorded scheduler.dt", minimum=0, maximum=60)
+        if _float32(dt) != dt:
+            raise ValueError("Recorded scheduler dt must roundtrip exactly through float32")
+        before = _int(row["command_index_before"], "recorded scheduler.before", maximum=MAX_TRACE_RECORDS - 1)
+        after = _int(
+            row["command_index_after"],
+            "recorded scheduler.after",
+            minimum=before,
+            maximum=MAX_TRACE_RECORDS - 1,
+        )
+        if before != previous_after:
+            raise ValueError("Recorded scheduler command spans must chain continuously from zero")
+        previous_after = after
+        count = _int(row["update_count"], "recorded scheduler.update_count", maximum=MAX_UPDATE_RECORDS)
+        update_ranges.append((update_total, update_total + count))
+        update_total += count
+        if update_total > MAX_UPDATE_RECORDS:
+            raise ValueError("Recorded update count exceeds the bounded native stream")
+        for side in ("before", "after"):
+            _phase(row[f"phase_{side}"], f"recorded scheduler.phase_{side}")
+    batches = plan["processing_batches"]
+    if not isinstance(batches, list) or not 1 <= len(batches) <= MAX_DELIVERY_EVENTS:
+        raise ValueError("Recorded replay requires 1 to 4096 processing batches")
+    flattened, last_command, last_delivery, last_input = [], 0, -1, -1
+    for item in batches:
+        row = _fields(
+            item,
+            "processing batch",
+            {
+                "source_delivery_sequence",
+                "command_index",
+                "update_sequence",
+                "scheduler_sequence",
+                "dt_seconds",
+                "clear_input_queue",
+                "inputs",
+            },
+        )
+        source_delivery = _int(
+            row["source_delivery_sequence"], "batch.source_delivery_sequence", maximum=MAX_DELIVERY_EVENTS - 1
+        )
+        command = _int(row["command_index"], "batch.command_index", minimum=1, maximum=previous_after)
+        if source_delivery <= last_delivery or command <= last_command:
+            raise ValueError("Processing batch source sequences and command indices must strictly increase")
+        last_delivery, last_command = source_delivery, command
+        scheduler = _int(row["scheduler_sequence"], "batch.scheduler_sequence", maximum=len(schedule) - 1)
+        start, stop = update_ranges[scheduler]
+        _int(row["update_sequence"], "batch.update_sequence", minimum=start, maximum=stop - 1)
+        if (
+            not schedule[scheduler]["command_index_before"]
+            < command
+            <= schedule[scheduler]["command_index_after"]
+        ):
+            raise ValueError("Processing batch command is outside its recorded scheduler span")
+        dt = finite(row["dt_seconds"], "batch.dt_seconds", minimum=0, maximum=60)
+        if _float32(dt) != dt:
+            raise ValueError("Processing batch dt must roundtrip exactly through float32")
+        _bool(row["clear_input_queue"], "batch.clear_input_queue")
+        if not isinstance(row["inputs"], list) or not 1 <= len(row["inputs"]) <= MAX_PLANNED_INPUTS:
+            raise ValueError("Processing batches must have bounded nonempty input lists")
+        for event in row["inputs"]:
+            _fields(event, "batch input", {"source_input_sequence", "player", "button", "pressed"})
+            source_input = _int(
+                event["source_input_sequence"], "batch.source_input_sequence", maximum=MAX_INPUT_RECORDS - 1
+            )
+            if source_input <= last_input:
+                raise ValueError("Source input sequences must strictly increase across processing batches")
+            last_input = source_input
+            _int(event["player"], "batch.player", minimum=1, maximum=2)
+            _int(event["button"], "batch.button", minimum=1, maximum=3)
+            _bool(event["pressed"], "batch.pressed")
+            flattened.append(
+                {"command_index": command, **{key: event[key] for key in ("player", "button", "pressed")}}
+            )
+            if len(flattened) > MAX_PLANNED_INPUTS:
+                raise ValueError("Recorded replay exceeds 4000 planned inputs")
+    if not isinstance(plan["inputs"], list):
+        raise ValueError("Recorded replay inputs must be an array")
+    for row in plan["inputs"]:
+        _fields(row, "recorded input", {"command_index", "player", "button", "pressed"})
+        _int(row["command_index"], "recorded input.command_index", minimum=1, maximum=previous_after)
+        _int(row["player"], "recorded input.player", minimum=1, maximum=2)
+        _int(row["button"], "recorded input.button", minimum=1, maximum=3)
+        _bool(row["pressed"], "recorded input.pressed")
+    if plan["inputs"] != flattened:
+        raise ValueError("Recorded replay inputs must equal the complete flattened processing batches")
+    return plan
+
+
+def _validate_recorded_capture(capture: dict) -> None:
+    attempt = capture["attempt"]
+    plan = validate_recorded_replay_plan(attempt["replay_bridge"])
+    if (
+        attempt["input_delivery"]["driver"] != "owned-processing-entry"
+        or attempt["start_kind"] != "level_start"
+    ):
+        raise ValueError("Schema 6 requires full-start owned-processing-entry replay")
+    if attempt["planned_inputs"] != plan["inputs"]:
+        raise ValueError("Schema 6 planned_inputs differs from its complete replay_bridge")
+    if (
+        plan["environment_sha256"] != capture["environment_sha256"]
+        or plan["level_sha256"] != capture["challenge"]["level_sha256"]
+        or plan["target_collector"] != capture["collector"]
+    ):
+        raise ValueError("Schema 6 replay_bridge target identity differs from the capture")
+    schedule = attempt["scheduler_updates"]
+    if len(schedule) != len(plan["scheduler_updates"]) or any(
+        row["parent_sequence"] is not None for row in schedule
+    ):
+        raise ValueError("Schema 6 must consume exactly the nonnested recorded scheduler stream")
+    counts = [0] * len(schedule)
+    for row in attempt["updates"]:
+        if row["parent_sequence"] is not None or row["scheduler_sequence"] is None:
+            raise ValueError("Schema 6 requires nonnested updates with recorded scheduler contexts")
+        counts[row["scheduler_sequence"]] += 1
+    for row, expected, count in zip(schedule, plan["scheduler_updates"], counts):
+        actual = {key: row[key] for key in expected if key != "update_count"}
+        actual["update_count"] = count
+        if actual != expected:
+            raise ValueError("Schema 6 delivered scheduler cadence/grouping differs from its replay_bridge")
+    if attempt["terminal"]["command_index"] != plan["scheduler_updates"][-1]["command_index_after"]:
+        raise ValueError("Schema 6 terminal precedes the full recorded cadence")
+    processors = [
+        row for row in attempt["delivery_events"] if row["event"] == "GJBaseGameLayer::processQueuedButtons"
+    ]
+    for batch in plan["processing_batches"]:
+        matches = [row for row in processors if row["command_index"] == batch["command_index"]]
+        if (
+            len(matches) != 1
+            or not matches[0]["in_command"]
+            or matches[0]["update_sequence"] != batch["update_sequence"]
+            or matches[0]["scheduler_sequence"] != batch["scheduler_sequence"]
+            or matches[0]["arguments"]
+            != {"dt_seconds": batch["dt_seconds"], "clear_input_queue": batch["clear_input_queue"]}
+        ):
+            raise ValueError("Schema 6 processing batch has no unique exact native receipt")
+        event = matches[0]
+        requests = [
+            row
+            for row in attempt["inputs"]
+            if row["phase"] == "requested"
+            and event["wall_enter_ns"] <= row["wall_time_ns"] <= event["wall_exit_ns"]
+            and all(
+                row[key] == event[key]
+                for key in ("command_index", "in_command", "update_sequence", "scheduler_sequence")
+            )
+        ]
+        if [{key: row[key] for key in ("player", "button", "pressed")} for row in requests] != [
+            {key: row[key] for key in ("player", "button", "pressed")} for row in batch["inputs"]
+        ]:
+            raise ValueError("Schema 6 requested batch receipts differ from the replay_bridge")
 
 
 def _input_signature(capture: dict) -> list[dict]:
@@ -1540,6 +1771,10 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         warnings.append(
             "Schema 5 retains raw Cocos keyboard codes and touch callback arguments/returns; callback entry, names and queue changes do not authenticate device or physical origin."
         )
+    if capture["schema_version"] == 6:
+        warnings.append(
+            "Schema 6 explicitly intervenes in Scheduler dt and injects owned requests at the first processing entry for each declared batch command; this does not reproduce native wall cadence or source UI callbacks."
+        )
     if capture["provenance"]["origin"] == "synthetic":
         warnings.insert(0, "SYNTHETIC capture fixture, not native Geometry Dash evidence.")
     if not capture["environment"]["configuration_complete"]:
@@ -1562,7 +1797,7 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         driver = capture["attempt"]["input_delivery"]["driver"]
         warnings.append(
             "Owned scheduled delivery suppresses unknown-origin non-injector handleButton requests; suppressed requests are diagnostic only."
-            if driver == "owned-pre-command"
+            if driver in {"owned-pre-command", "owned-processing-entry"}
             else "Scheduled UI delivery forwards and records observed native requests, including unsolicited requests; scheduled intent does not authenticate their origin."
         )
     else:
@@ -1716,6 +1951,11 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
                 raise ValueError("Incompatible capture object_watches")
             if capture["attempt"]["input_delivery"] != base["attempt"]["input_delivery"]:
                 raise ValueError("Repeat comparison requires the same input_delivery identity")
+        if (
+            base["schema_version"] == 6
+            and capture["attempt"]["replay_bridge"] != base["attempt"]["replay_bridge"]
+        ):
+            raise ValueError("Recorded repeat comparison requires the same complete replay_bridge")
         attempt = capture["attempt"]
         if attempt["start_kind"] != "level_start":
             raise ValueError("Repeat comparison requires true full-start attempts")
@@ -2030,7 +2270,8 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
                 if base["environment"]["input_policy"] == INPUT_POLICY
                 or (
                     base["schema_version"] >= 4
-                    and base["attempt"]["input_delivery"]["driver"] == "owned-pre-command"
+                    and base["attempt"]["input_delivery"]["driver"]
+                    in {"owned-pre-command", "owned-processing-entry"}
                 )
                 else [
                     "UI delivery records forwarded observed requests; suppressed-input counterfactuals and hardware equivalence are unsupported."

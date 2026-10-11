@@ -41,6 +41,19 @@ def parser():
     )
     delivery.add_argument("owned", type=Path)
     delivery.add_argument("ui", type=Path)
+    recorded_plan = commands.add_parser(
+        "native-replay-plan", help="Export an explicit recorded-cadence/request intervention"
+    )
+    recorded_plan.add_argument("source", type=Path)
+    recorded_plan.add_argument("target_baseline", type=Path)
+    recorded_compare = commands.add_parser(
+        "native-recorded-compare", help="Compare a source recording with fresh recorded-plan replays"
+    )
+    recorded_compare.add_argument("source", type=Path)
+    recorded_compare.add_argument("plan", type=Path)
+    recorded_compare.add_argument(
+        "replays", type=Path, nargs="+", help="Two to sixteen fresh replay captures"
+    )
     fixtures = commands.add_parser(
         "fixtures", help="Validate generated fixture specifications; no native verification"
     )
@@ -84,6 +97,8 @@ def parser():
         native,
         compare,
         delivery,
+        recorded_plan,
+        recorded_compare,
         fixtures,
         fixture_check,
         fixture_response,
@@ -142,6 +157,14 @@ def main(argv=None):
             from .equivalence import compare_native_delivery
 
             result = compare_native_delivery(args.owned, args.ui)
+        elif args.command == "native-replay-plan":
+            from .replaybridge import export_recorded_replay_plan
+
+            result = export_recorded_replay_plan(args.source, args.target_baseline)
+        elif args.command == "native-recorded-compare":
+            from .replaybridge import compare_recorded_replay
+
+            result = compare_recorded_replay(args.source, args.plan, args.replays)
         elif args.command == "fixtures":
             from .fixtures import get_fixture_run, load_fixture_matrix
 
