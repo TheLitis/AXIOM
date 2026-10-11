@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $true)][string]$GameDirectory,
     [string]$RuntimeDirectory,
     [string]$OutputDirectory,
-    [ValidateRange(30, 600)][int]$TimeoutSeconds = 180
+    [ValidateRange(30, 600)][int]$TimeoutSeconds = 300
 )
 
 # User-operated observation only: no replay, clock intervention or OS injection.
@@ -34,7 +34,7 @@ try {
     $priorExecutionState = [AxiomManualPower]::SetThreadExecutionState([uint32]2147483651)
     if (-not $priorExecutionState) { throw 'Unable to request temporary system/display execution state.' }
     & (Join-Path $PSScriptRoot 'prepare-native-sandbox.ps1') -GameDirectory $GameDirectory -RuntimeDirectory $runtime
-    $level = 'kA13,0,kA15,0,kA16,0,kA14,0;1,1,2,1800,3,-15;'
+    $level = 'kA13,0,kA15,0,kA16,0,kA14,0;1,1,2,6000,3,-15;'
     [IO.File]::WriteAllText((Join-Path $runtime 'fixture-level.txt'), $level, [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $out 'fixture-level.txt'), $level, [Text.UTF8Encoding]::new($false))
     $before = @{}
@@ -53,7 +53,7 @@ try {
         package_sha256=(Get-FileHash -LiteralPath (Join-Path $runtime 'geode/mods/axiom.native-capture.geode') -Algorithm SHA256).Hash.ToLowerInvariant()
         input_provenance='unknown'; human_authorship='requires_separate_user_statement'
     } | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
-    Write-Host "Manual observation window launched; click Start AXIOM Test, then press/release Space. Evidence: $out"
+    Write-Host "Manual observation window launched; click Start AXIOM Test, then press/release Space, W, Up, A, D, Left and Right, and click inside gameplay. Let the fixture finish. Evidence: $out"
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $capture = $null
     while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
@@ -68,9 +68,11 @@ try {
     & $python -m axiom native $destination --json (Join-Path $out 'inspection.json')
     if ($LASTEXITCODE -ne 0) { throw 'Manual capture failed structure/integrity validation; evidence retained.' }
     $data = Get-Content -LiteralPath $destination -Raw | ConvertFrom-Json
-    if ($data.schema_version -ne 4 -or $data.environment.clocks.clock_policy -ne 'native' -or $data.attempt.input_delivery.driver -ne 'none' -or $data.attempt.input_source -ne 'unknown') {
+    if ($data.schema_version -ne 5 -or $data.environment.clocks.clock_policy -ne 'native' -or $data.attempt.input_delivery.driver -ne 'none' -or $data.attempt.input_source -ne 'unknown') {
         throw 'Manual observation domain differs from requested no-replay native-clock conditions.'
     }
+    $inspection = Get-Content -LiteralPath (Join-Path $out 'inspection.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $inspection.input_entry_observations) { throw 'Schema-5 input-entry observations are missing.' }
     $levelHasher = [Security.Cryptography.SHA256]::Create()
     try { $levelHash = [BitConverter]::ToString($levelHasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($level))).Replace('-', '').ToLowerInvariant() }
     finally { $levelHasher.Dispose() }
@@ -79,6 +81,7 @@ try {
         kind='native_manual_input_observation'; recorded_at_utc=[DateTime]::UtcNow.ToString('o')
         capture_sha256=(Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
         collector=$data.collector; outcome=$data.attempt.terminal.outcome; terminal_command_index=$data.attempt.terminal.command_index
+        capture_schema_version=$data.schema_version; input_entry_observations=$inspection.input_entry_observations
         native_input_receipt_count=$data.attempt.inputs.Count; delivery_event_count=$data.attempt.delivery_events.Count
         input_provenance='unknown'; human_authorship='requires_separate_user_statement'
         ordinary_input_equivalence='not_established'; m1_gate='not_established'

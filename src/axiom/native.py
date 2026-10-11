@@ -32,6 +32,33 @@ PLAYER_FIELDS_V3 = PLAYER_FIELDS | {"gravity_inverted", "vehicle_size", "player_
 PLAYER_FIELDS_V4 = PLAYER_FIELDS_V3 | {"is_on_ground", "is_on_slope"}
 LAYER_FIELDS_V3 = frozenset({"dual_active"})
 PHASE_FIELDS = frozenset({"level_end_animation_started", "has_completed_level"})
+KEYBOARD_EVENTS = frozenset({"UILayer::keyDown", "UILayer::keyUp"})
+TOUCH_EVENTS = frozenset({"UILayer::ccTouchBegan", "UILayer::ccTouchEnded", "UILayer::ccTouchCancelled"})
+# Names from the pinned SDK's cocos/robtop/keyboard_dispatcher/CCKeyboardDelegate.h.
+# These identify raw Cocos enum values, not physical keys or input devices.
+COCOS_KEY_NAMES = {
+    -1: "KEY_Unknown",
+    0: "KEY_None",
+    8: "KEY_Backspace",
+    9: "KEY_Tab",
+    13: "KEY_Enter",
+    16: "KEY_Shift",
+    17: "KEY_Control",
+    18: "KEY_Alt",
+    27: "KEY_Escape",
+    32: "KEY_Space",
+    37: "KEY_Left",
+    38: "KEY_Up",
+    39: "KEY_Right",
+    40: "KEY_Down",
+    **{65 + index: f"KEY_{letter}" for index, letter in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ")},
+    283: "KEY_ArrowUp",
+    284: "KEY_ArrowDown",
+    285: "KEY_ArrowLeft",
+    286: "KEY_ArrowRight",
+    4352: "MOUSE_4",
+    4353: "MOUSE_5",
+}
 
 
 def canonical_sha256(value: Any) -> str:
@@ -451,6 +478,8 @@ def _validate_paired_events(capture: dict, name: str) -> None:
         if name == "mechanic_events"
         else {"queue_before", "queue_after", "layer_timestamp_before", "layer_timestamp_after"}
     )
+    if name == "delivery_events" and capture["schema_version"] >= 5:
+        extra |= {"native_return"}
     previous_command, previous_enter = -1, -1
     stack: list[int] = []
     terminal_limit = (terminal["wall_elapsed_seconds"] + 1e-6) * 1e9
@@ -514,10 +543,19 @@ def _validate_paired_events(capture: dict, name: str) -> None:
             event, args = row["event"], row["arguments"]
             if not isinstance(event, str):
                 raise ValueError("Unsupported native delivery event")
-            if event in {"UILayer::keyDown", "UILayer::keyUp"}:
+            if event in KEYBOARD_EVENTS:
                 _fields(args, "delivery.arguments", {"key_code", "timestamp"})
                 _raw_int(args["key_code"], "delivery.key_code")
                 finite(args["timestamp"], "delivery.timestamp")
+            elif capture["schema_version"] >= 5 and event in TOUCH_EVENTS:
+                _fields(args, "delivery.arguments", {"touch_id", "view_x", "view_y", "timestamp"})
+                null_fields = [value is None for value in args.values()]
+                if any(null_fields) and not all(null_fields):
+                    raise ValueError("Touch arguments must be all null or all raw nonnull values")
+                if not all(null_fields):
+                    _raw_int(args["touch_id"], "delivery.touch_id")
+                    for field in ("view_x", "view_y", "timestamp"):
+                        finite(args[field], f"delivery.{field}")
             elif event == "GJBaseGameLayer::processQueuedButtons":
                 _fields(args, "delivery.arguments", {"dt_seconds", "clear_input_queue"})
                 finite(args["dt_seconds"], "delivery.dt_seconds", minimum=0, maximum=60)
@@ -526,6 +564,11 @@ def _validate_paired_events(capture: dict, name: str) -> None:
                     raise ValueError("Recorded processQueuedButtons must have a nonempty entry queue")
             else:
                 raise ValueError("Unsupported native delivery event")
+            if capture["schema_version"] >= 5:
+                if event == "UILayer::ccTouchBegan":
+                    _bool(row["native_return"], "delivery.native_return")
+                elif row["native_return"] is not None:
+                    raise ValueError("Void native delivery events require native_return=null")
             for side in ("before", "after"):
                 _queue(row[f"queue_{side}"], f"delivery.queue_{side}")
                 finite(row[f"layer_timestamp_{side}"], f"delivery.layer_timestamp_{side}")
@@ -607,11 +650,11 @@ def _validate_v4(capture: dict) -> None:
 def _load(path: str | Path) -> tuple[dict, str]:
     capture, source_sha256 = read_json(path)
     version = capture.get("schema_version") if isinstance(capture, dict) else None
-    if type(version) is not int or version not in {1, 2, 3, 4}:
-        raise ValueError("native capture schema_version must be integer 1, 2, 3 or 4")
+    if type(version) is not int or version not in {1, 2, 3, 4, 5}:
+        raise ValueError("native capture schema_version must be integer 1, 2, 3, 4 or 5")
     rich = version >= 2
     extended = version >= 3
-    contacts = version == 4
+    contacts = version >= 4
     _fields(
         capture,
         "capture",
@@ -1197,7 +1240,7 @@ def native_event_signature(value: Any) -> Any:
 
 
 def delivery_context_signature(rows: list[dict]) -> list[dict]:
-    """Project validated schema-4 delivery events under a declared bounded scope.
+    """Project validated schema-4/5 delivery events under a declared bounded scope.
 
     Absolute native timestamps vary between runs. This projection excludes their
     raw values without converting them into relative or simulated timestamps.
@@ -1208,7 +1251,7 @@ def delivery_context_signature(rows: list[dict]) -> list[dict]:
     for row in result:
         for key in ("layer_timestamp_before", "layer_timestamp_after"):
             row.pop(key)
-        if row["event"] in {"UILayer::keyDown", "UILayer::keyUp"}:
+        if row["event"] in KEYBOARD_EVENTS | TOUCH_EVENTS:
             row["arguments"].pop("timestamp")
         for key in ("queue_before", "queue_after"):
             for queued in row[key]:
@@ -1394,6 +1437,83 @@ def _rich_comparison(baseline: dict, compared: dict) -> dict:
     }
 
 
+def _input_entry_observations(capture: dict) -> dict:
+    """Describe each validated callback entry without assigning a device or action."""
+    keyboard, touches = [], []
+    event_counts = {event: 0 for event in sorted(KEYBOARD_EVENTS | TOUCH_EVENTS)}
+    event_counts["GJBaseGameLayer::processQueuedButtons"] = 0
+    key_counts: dict[int, dict] = {}
+    for event in capture["attempt"]["delivery_events"]:
+        event_counts[event["event"]] += 1
+        if event["event"] not in KEYBOARD_EVENTS | TOUCH_EVENTS:
+            continue
+        before, after = event["queue_before"], event["queue_after"]
+        prefix_retained = after[: len(before)] == before
+        entry = {
+            key: event[key]
+            for key in (
+                "sequence",
+                "parent_sequence",
+                "event",
+                "command_index",
+                "in_command",
+                "update_sequence",
+                "scheduler_sequence",
+                "phase_before",
+                "phase_after",
+                "wall_enter_ns",
+                "wall_exit_ns",
+                "native_return",
+                "layer_timestamp_before",
+                "layer_timestamp_after",
+            )
+        }
+        entry.update(
+            queue_prefix_retained=prefix_retained,
+            appended_queued_commands=after[len(before) :] if prefix_retained else None,
+            queue_attribution="paired_append_snapshot_only"
+            if prefix_retained
+            else "unavailable_nonprefix_queue_change",
+        )
+        if event["event"] in KEYBOARD_EVENTS:
+            code = event["arguments"]["key_code"]
+            name = COCOS_KEY_NAMES.get(code, f"Unknown Cocos key code {code}")
+            entry.update(
+                key_code=code,
+                key_name=name,
+                pressed=event["event"] == "UILayer::keyDown",
+                timestamp=event["arguments"]["timestamp"],
+            )
+            keyboard.append(entry)
+            count = key_counts.setdefault(
+                code, {"key_code": code, "key_name": name, "key_down_count": 0, "key_up_count": 0}
+            )
+            count["key_down_count" if entry["pressed"] else "key_up_count"] += 1
+        else:
+            entry.update(event["arguments"])
+            touches.append(entry)
+    return {
+        "scope": "recorded_uilayer_callback_entries_and_paired_queue_snapshots",
+        "key_code_namespace": "raw_cocos_enumKeyCodes",
+        "keyboard_edges": keyboard,
+        "touch_edges": touches,
+        "counts": {
+            "keyboard_edges": len(keyboard),
+            "touch_edges": len(touches),
+            "event_types": event_counts,
+            "keys": [key_counts[code] for code in sorted(key_counts)],
+            "null_touch_arguments": sum(row["touch_id"] is None for row in touches),
+        },
+        "attempt_delivery": capture["attempt"]["input_delivery"],
+        "authentication_status": "not_authenticated",
+        "physical_device": "not_identified",
+        "game_action_mapping": "not_inferred_from_callback_entry",
+        "queue_origin_authentication": "not_established",
+        "touch_timestamp_units": "raw_CCTouch_getTimestamp_uncharacterized",
+        "callback_pressed_scope": "keyboard_callback_direction_only",
+    }
+
+
 def _summary(capture: dict, source_sha256: str) -> dict:
     warnings = [
         "The supplied file's declared native origin is not authenticated or independently verified.",
@@ -1410,12 +1530,16 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         warnings.append(
             "Schema 3 preserves raw gravity_inverted, vehicle_size, player_speed and dual_active; size categories, speed units and complete player lifecycle are not inferred."
         )
-    if capture["schema_version"] == 4:
+    if capture["schema_version"] >= 4:
         warnings += [
             "Schema 4 records raw is_on_ground/is_on_slope, declared watched object fields and selected paired native callbacks; these are not a complete collider or trigger simulation.",
             "Scheduled UILayer callbacks are synthetic in-engine delivery, not OS or hardware input; observed native receipts do not authenticate queued origins.",
             "Object runtime_unique_id, wall timestamps and raw absolute delivery timestamps are cross-run diagnostics; delivery context and strict mechanic snapshots remain exact.",
         ]
+    if capture["schema_version"] >= 5:
+        warnings.append(
+            "Schema 5 retains raw Cocos keyboard codes and touch callback arguments/returns; callback entry, names and queue changes do not authenticate device or physical origin."
+        )
     if capture["provenance"]["origin"] == "synthetic":
         warnings.insert(0, "SYNTHETIC capture fixture, not native Geometry Dash evidence.")
     if not capture["environment"]["configuration_complete"]:
@@ -1434,7 +1558,7 @@ def _summary(capture: dict, source_sha256: str) -> dict:
                 "Blocked inputs were not forwarded; their effect on a counterfactual unsuppressed trajectory is not measured.",
             ]
         )
-    elif capture["schema_version"] == 4:
+    elif capture["schema_version"] >= 4:
         driver = capture["attempt"]["input_delivery"]["driver"]
         warnings.append(
             "Owned scheduled delivery suppresses unknown-origin non-injector handleButton requests; suppressed requests are diagnostic only."
@@ -1504,7 +1628,7 @@ def _summary(capture: dict, source_sha256: str) -> dict:
         },
         "replay_execution_status": (
             "scheduled_intent_with_observed_native_receipts"
-            if capture["schema_version"] == 4
+            if capture["schema_version"] >= 4
             and capture["attempt"]["input_delivery"]["driver"] == "scheduled-ui-callback"
             else "observed_prefix_through_terminal"
             if capture["attempt"]["input_source"] == "replay"
@@ -1544,7 +1668,12 @@ def _summary(capture: dict, source_sha256: str) -> dict:
                     "delivery_event_count": len(capture["attempt"]["delivery_events"]),
                 },
             }
-            if capture["schema_version"] == 4
+            if capture["schema_version"] >= 4
+            else {}
+        ),
+        **(
+            {"input_entry_observations": _input_entry_observations(capture)}
+            if capture["schema_version"] >= 5
             else {}
         ),
         "reported_hook_dt_sum_seconds": sum(row["dt_seconds"] for row in capture["attempt"]["trace"]),
@@ -1580,7 +1709,7 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
         ):
             if capture[key] != base[key]:
                 raise ValueError(f"Incompatible capture {key}")
-        if base["schema_version"] == 4:
+        if base["schema_version"] >= 4:
             if native_event_signature(capture["object_watches"]) != native_event_signature(
                 base["object_watches"]
             ):
@@ -1648,7 +1777,7 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
         object_components = {}
         object_identity_diagnostics = {}
         absolute_timestamp_diagnostics = {}
-        if base["schema_version"] == 4:
+        if base["schema_version"] >= 4:
             object_identity_diagnostics = {
                 "stable_watch_identity_equal": True,
                 "runtime_unique_ids_equal": capture["object_watches"] == base["object_watches"],
@@ -1738,7 +1867,7 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
                 ),
                 **(
                     {"delivery_absolute_timestamp_diagnostics": absolute_timestamp_diagnostics}
-                    if base["schema_version"] == 4
+                    if base["schema_version"] >= 4
                     else {}
                 ),
                 "pre_end_animation_diagnostics": _pre_end_comparison(base, capture),
@@ -1783,7 +1912,7 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
     if base["schema_version"] >= 3:
         for key in ("recorded_dual_active_equal", "terminal_dual_active_equal"):
             component_consistency[key] = all(row[key] for row in comparisons)
-    if base["schema_version"] == 4:
+    if base["schema_version"] >= 4:
         for key, component in (
             ("native_mechanic_events_equal", "mechanic_events"),
             ("native_delivery_context_equal", "delivery_events"),
@@ -1804,7 +1933,11 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
             {
                 "delivery_context_protocol": {
                     "id": "native-delivery-context-v1",
-                    "scope": "exact_recorded_delivery_events_without_raw_absolute_native_time",
+                    "scope": (
+                        "exact_recorded_delivery_events_without_raw_native_timestamp_values"
+                        if base["schema_version"] >= 5
+                        else "exact_recorded_delivery_events_without_raw_absolute_native_time"
+                    ),
                     "excluded_native_time_fields": [
                         "layer_timestamp_before",
                         "layer_timestamp_after",
@@ -1812,13 +1945,22 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
                         "queue_before[].timestamp",
                         "queue_after[].timestamp",
                     ],
-                    "retained": "event_order_nesting_command_context_phase_key_queue_button_pressed_player_step_delivered_dt",
+                    "retained": (
+                        "event_order_nesting_command_context_phase_key_touch_identity_view_coordinates_native_return_queue_button_pressed_player_step_delivered_dt"
+                        if base["schema_version"] >= 5
+                        else "event_order_nesting_command_context_phase_key_queue_button_pressed_player_step_delivered_dt"
+                    ),
                     "raw_absolute_time_comparison": "separate_diagnostic_without_gate_influence",
                     "input_receipt_scope": "every_actual_native_receipt_through_terminal",
                     "relative_timestamp_normalization": "none",
+                    **(
+                        {"touch_timestamp_units": "raw_CCTouch_getTimestamp_uncharacterized"}
+                        if base["schema_version"] >= 5
+                        else {}
+                    ),
                 },
             }
-            if base["schema_version"] == 4
+            if base["schema_version"] >= 4
             else {}
         ),
         "component_consistency": component_consistency,
@@ -1876,7 +2018,7 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
                     "Runtime object UIDs and event wall times are diagnostic only; stable watch selectors, native receipt contexts and event snapshots remain exact.",
                     "Scheduled UI callbacks are in-engine synthetic delivery, not OS or hardware-input equivalence.",
                 ]
-                if base["schema_version"] == 4
+                if base["schema_version"] >= 4
                 else []
             ),
             *(
@@ -1887,13 +2029,13 @@ def compare_native_captures(paths: Sequence[str | Path]) -> dict:
                 ]
                 if base["environment"]["input_policy"] == INPUT_POLICY
                 or (
-                    base["schema_version"] == 4
+                    base["schema_version"] >= 4
                     and base["attempt"]["input_delivery"]["driver"] == "owned-pre-command"
                 )
                 else [
                     "UI delivery records forwarded observed requests; suppressed-input counterfactuals and hardware equivalence are unsupported."
                 ]
-                if base["schema_version"] == 4
+                if base["schema_version"] >= 4
                 else [
                     "The legacy input policy does not supply owned-channel suppression or blocked-input diagnostics."
                 ]

@@ -552,7 +552,7 @@ def _mechanics_checks(required: dict, observed: dict, availability: dict, modes:
 
 
 def _witness_observations(capture: dict, declarations: list) -> list[dict]:
-    available = capture["schema_version"] == 4
+    available = capture["schema_version"] >= 4
     results = []
     rows = _pre_end_rows(capture) if available else []
     for declaration in declarations:
@@ -618,7 +618,7 @@ def _watch_value(rows: list, group: int, field: str) -> object:
 
 
 def _effect_observations(capture: dict, declarations: list) -> list[dict]:
-    available = capture["schema_version"] == 4
+    available = capture["schema_version"] >= 4
     events = capture["attempt"]["mechanic_events"] if available else []
     trace = _pre_end_rows(capture) if available else []
     results = []
@@ -774,7 +774,7 @@ def _evaluate_capture(matrix: dict, case_id: str, run_id: str, capture: dict) ->
         else attempt["terminal"]["outcome"] == run["expected_outcome"],
         "required_modes_observed": all(mode_checks.values()),
     }
-    if capture["schema_version"] == 4:
+    if capture["schema_version"] >= 4:
         expected_driver = "none" if run["input_mode"] == "observation" else "owned-pre-command"
         checks["input_delivery_matches_fixture_role"] = attempt["input_delivery"]["driver"] == expected_driver
     result = {
@@ -830,8 +830,8 @@ def _evaluate_capture(matrix: dict, case_id: str, run_id: str, capture: dict) ->
         witnesses = _witness_observations(capture, run["required_state_witnesses"])
         effects = _effect_observations(capture, run["required_effect_checks"])
         checks.update(
-            native_contact_effect_fields_available=capture["schema_version"] == 4,
-            watch_groups_match=capture["schema_version"] == 4
+            native_contact_effect_fields_available=capture["schema_version"] >= 4,
+            watch_groups_match=capture["schema_version"] >= 4
             and [watch["group_id"] for watch in capture["object_watches"]] == run["watch_groups"],
             required_state_witnesses_observed=all(row["matched"] for row in witnesses),
             required_effect_checks_observed=all(row["matched"] for row in effects),
@@ -840,7 +840,7 @@ def _evaluate_capture(matrix: dict, case_id: str, run_id: str, capture: dict) ->
             state_witness_checks=witnesses,
             effect_checks=effects,
             declared_watch_groups=run["watch_groups"],
-            observed_object_watches=capture["object_watches"] if capture["schema_version"] == 4 else None,
+            observed_object_watches=capture["object_watches"] if capture["schema_version"] >= 4 else None,
             contact_effect_observation_scope="schema4_joint_pre_ending_fields_and_paired_runtime_events",
             status="fixture_observations_match" if all(checks.values()) else "fixture_observations_mismatch",
         )
@@ -870,6 +870,11 @@ def compare_fixture_response(
     if check is None:
         raise ValueError(f"Unknown fixture response check: {check_id}")
     reference, changed = load_native_capture(reference_path), load_native_capture(changed_path)
+    if (
+        5 in {reference["schema_version"], changed["schema_version"]}
+        and reference["schema_version"] != changed["schema_version"]
+    ):
+        raise ValueError("Fixture response requires the same capture schema_version")
     inspections = [
         _evaluate_capture(matrix, case_id, check[key], capture)
         for key, capture in (("reference_run", reference), ("changed_run", changed))
@@ -951,21 +956,21 @@ def compare_fixture_response(
         "input_plans_differ": first_changed_input is not None,
         "selected_response_differs": first_difference is not None,
     }
-    if reference["schema_version"] == 4 or changed["schema_version"] == 4:
+    if reference["schema_version"] >= 4 or changed["schema_version"] >= 4:
         checks["owned_replay_delivery_in_both_captures"] = all(
-            capture["schema_version"] != 4
+            capture["schema_version"] < 4
             or capture["attempt"]["input_delivery"]["driver"] == "owned-pre-command"
             for capture in (reference, changed)
         )
         checks["same_selected_initial_watched_objects"] = (
-            reference["schema_version"] == 4
-            and changed["schema_version"] == 4
+            reference["schema_version"] >= 4
+            and changed["schema_version"] >= 4
             and reference["attempt"]["trace"][0]["watched_objects"]
             == changed["attempt"]["trace"][0]["watched_objects"]
         )
         checks["same_watched_prefix_before_changed_input"] = (
-            reference["schema_version"] == 4
-            and changed["schema_version"] == 4
+            reference["schema_version"] >= 4
+            and changed["schema_version"] >= 4
             and all(
                 left["watched_objects"] == right["watched_objects"]
                 for left, right in zip(reference["attempt"]["trace"], changed["attempt"]["trace"])

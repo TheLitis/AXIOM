@@ -280,9 +280,11 @@ def compare_fixture_variants(study_path, matrix_path, case_id, positive_path, co
     if case is None:
         raise ValueError("Unknown variant study case")
     captures = {"positive": load_native_capture(positive_path), "control": load_native_capture(control_path)}
-    if any(data["schema_version"] != 4 for data in captures.values()):
-        raise ValueError("Variant contrast requires native capture schema 4")
+    if any(data["schema_version"] not in {4, 5} for data in captures.values()):
+        raise ValueError("Variant contrast requires native capture schema 4 or 5")
     positive, control = captures.values()
+    if positive["schema_version"] != control["schema_version"]:
+        raise ValueError("Variant contrast requires the same capture schema_version")
     if positive["attempt"]["id"] == control["attempt"]["id"]:
         raise ValueError("Variant contrast requires distinct attempts")
     for key in ("environment", "collector", "state_fields", "layer_state_fields"):

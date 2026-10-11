@@ -314,7 +314,7 @@ try {
         Invoke-StudyAnalysis @('-m', 'axiom', 'native', $ownedPath, '--json', $ownedInspectionPath) (Join-Path $casePath 'owned-inspection')
         $owned = Get-Content -LiteralPath $ownedPath -Raw | ConvertFrom-Json
         $ownedInspection = Get-Content -LiteralPath $ownedInspectionPath -Raw | ConvertFrom-Json
-        if ($owned.schema_version -ne 4 -or $owned.attempt.start_kind -ne 'level_start' -or $owned.attempt.input_source -ne 'replay' -or
+        if ($owned.schema_version -notin @(4, 5) -or $owned.attempt.start_kind -ne 'level_start' -or $owned.attempt.input_source -ne 'replay' -or
             $owned.attempt.input_delivery.driver -ne 'owned-pre-command' -or $ownedInspection.counts.unexecuted_planned_tail -ne 0) { throw 'Owned reference is outside the declared delivery domain.' }
         Assert-StudyIdentity @($owned.attempt.planned_inputs) @($run.inputs) 'owned planned inputs'
         Assert-StudyIdentity $owned.collector $caseEvidence[0].collector 'confirming collector'
@@ -385,7 +385,7 @@ try {
             $record.attempt_id = $data.attempt.id
             if ($seenAttempts.ContainsKey($data.attempt.id)) { throw 'Duplicate attempt ID in the delivery study.' }
             $seenAttempts[$data.attempt.id] = $true
-            if ($data.schema_version -ne 4 -or $data.attempt.input_delivery.driver -ne 'scheduled-ui-callback' -or
+            if ($data.schema_version -ne $selection.Owned.schema_version -or $data.attempt.input_delivery.driver -ne 'scheduled-ui-callback' -or
                 $data.attempt.replay_sha256 -cne $selection.Record.plan_sha256 -or $inspection.counts.unexecuted_planned_tail -ne 0) { throw 'UI capture route or full planned execution differs.' }
             foreach ($key in @('challenge', 'environment', 'collector', 'state_fields', 'layer_state_fields')) {
                 Assert-StudyIdentity $data.$key $selection.Owned.$key $key

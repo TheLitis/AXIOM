@@ -109,8 +109,8 @@ class $modify(AxiomSandboxMenu, MenuLayer) {
                 menu_selector(AxiomSandboxMenu::onAxiomManualStart));
             menu->addChild(button);
             this->addChild(menu, 100);
-            auto label = CCLabelBMFont::create("Press and release SPACE after starting", "bigFont.fnt");
-            label->setScale(0.35f);
+            auto label = CCLabelBMFont::create("SPACE W UP A D LEFT RIGHT + click after starting", "bigFont.fnt");
+            label->setScale(0.25f);
             label->setPosition({size.width / 2.f, size.height - 60.f});
             this->addChild(label, 100);
             log::info("AXIOM sandbox manual test ready; waiting for the user's Start AXIOM Test button");

@@ -5,7 +5,8 @@ param(
     [ValidateRange(2, 16)][int]$Repetitions = 3,
     [ValidateSet('native', 'fixed-base-60', 'fixed-scheduler-240')][string]$ClockPolicy = 'fixed-scheduler-240',
     [string]$OutputDirectory,
-    [string]$RuntimeDirectory
+    [string]$RuntimeDirectory,
+    [ValidateRange(30, 600)][int]$AttemptTimeoutSeconds = 45
 )
 
 # Generated fixtures are specifications, not authenticated measurements or AR.
@@ -71,7 +72,7 @@ function Invoke-MatrixCapture($Case, $Run, [int]$Index, [string]$Directory) {
     $captureFailure = $null
     try {
         $capture = $null
-        while ($timer.Elapsed.TotalSeconds -lt 45) {
+        while ($timer.Elapsed.TotalSeconds -lt $AttemptTimeoutSeconds) {
             $capture = Get-ChildItem -LiteralPath $captures -File -Filter '*.json' -ErrorAction SilentlyContinue | Where-Object { -not $before.ContainsKey($_.Name) } | Sort-Object Name | Select-Object -First 1
             if ($capture) { break }
             if ($process.HasExited) { throw 'Sandbox exited before export.' }

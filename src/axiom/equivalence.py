@@ -124,8 +124,10 @@ def compare_native_delivery(owned_path: str | Path, ui_path: str | Path) -> dict
     """
     paths = [Path(owned_path), Path(ui_path)]
     owned, ui = [load_native_capture(path) for path in paths]
-    if any(capture["schema_version"] != 4 for capture in (owned, ui)):
-        raise ValueError("Delivery comparison requires schema 4 captures")
+    if any(capture["schema_version"] not in {4, 5} for capture in (owned, ui)):
+        raise ValueError("Delivery comparison requires schema 4 or 5 captures")
+    if owned["schema_version"] != ui["schema_version"]:
+        raise ValueError("Delivery comparison requires the same capture schema_version")
     if owned["attempt"]["id"] == ui["attempt"]["id"]:
         raise ValueError("Delivery comparison requires distinct attempts")
     for capture, driver in ((owned, "owned-pre-command"), (ui, "scheduled-ui-callback")):

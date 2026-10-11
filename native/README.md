@@ -5,6 +5,11 @@ Windows x64 / Geometry Dash 2.2081 / Geode 5.8.2. It does not calculate AR, prov
 complete engine determinism, infer collision geometry or estimate human limits.
 Build success and a loaded DLL do not establish gameplay capture or replay fidelity.
 
+Current source writes schema 5 with paired gameplay touch entries and readable
+keyboard/touch inspection. This extension awaits fresh native verification;
+historical schema-4 interaction/manual evidence remains separately identified.
+See [input observation](../docs/input-observation.md).
+
 Build from the repository root with `scripts/build-native.ps1`. The script and
 CMake pin SDK commit `2a5fd87433da47d6bf07221774f0cbb25535ae08` and bindings
 commit `2a8b5c489ce8b49e7061b0543aa2bc5b22570063`. Packaging uses
@@ -34,14 +39,17 @@ isolated; the launch procedure must establish that separately.
 
 `--geode:axiom-sandbox-manual` adds the guarded visible **Start AXIOM Test** button
 instead of automatically launching the fixture. `scripts/run-native-manual-input.ps1`
-uses that control for user-operated native-clock observation, with no replay plan
-or synthetic OS input. Driver `none` and input provenance remain unknown; a
-separate user statement cannot authenticate device origin.
+uses that control for schema-5 native-clock observation, with no replay plan or
+synthetic OS input. Its default timeout is 300 seconds and its longer flat fixture
+has a raw terminal marker at X6000. Press/release Space, W, Up, A, D, Left and
+Right separately, click inside gameplay with the left mouse button, then let the
+fixture finish. Driver `none` and input provenance remain unknown; a separate
+user statement cannot authenticate device origin.
 
 ## Capture semantics
 
-New `native_capture` documents have schema version 4 and one `attempt`. The Python
-reader strictly accepts historical schemas 1, 2 and 3 without fabricating absent fields.
+New `native_capture` documents have schema version 5 and one `attempt`. The Python
+reader strictly accepts historical schemas 1, 2, 3 and 4 without fabricating absent fields.
 Each document includes
 the exact SHA-256 of bytes held in `GJGameLevel::m_levelString`, executable, adapter
 and loaded mod binaries; pinned collector source/SDK/bindings identities;
@@ -108,6 +116,24 @@ absolute timestamps. Mechanic and delivery streams each allow at most 4,096
 events; queues at most 256 buttons; object groups/remap vectors at most 64 entries.
 The [interaction contract](../docs/native-interactions.md) defines meaningful
 state/effect witnesses and same-plan controls with different exact level hashes.
+
+Schema 5 adds paired `UILayer::ccTouchBegan`, `ccTouchEnded` and
+`ccTouchCancelled` delivery events. Their arguments retain raw `touch_id`,
+`view_x`, `view_y` and `timestamp`, all null only when the native touch pointer is
+null. Every schema-5 delivery row requires `native_return`: Boolean for touch
+begin, null for the void callbacks. A true begin return identifies neither a
+physical device nor accepted gameplay input; cancellation is not a fabricated
+release. The selected UILayer pointer is checked before reading UI fields,
+including the shared empty cancellation binding.
+
+Existing `keyDown/keyUp` hooks record all raw key codes reaching that gameplay
+layer. The schema-5-only inspector field `input_entry_observations` retains
+`keyboard_edges`, `touch_edges`, names for known raw Cocos codes and queue-change
+observations. Unknown codes remain readable raw values. Touch coordinates/times
+are native API values, not physical screen coordinates or hardware timestamps.
+Right/middle mouse entries are not captured by these chosen hooks. The full
+delivery/input streams remain authoritative; the summary does not deduplicate
+cleanup or repeat events or authenticate their origin.
 
 `handleButton` records a **requested** event before its original call. Player
 `pushButton`/`releaseButton` record the callback and returned Boolean after the
@@ -199,15 +225,17 @@ native phases and all selected state remain strict comparison evidence. Passing
 an isolated fixed-clock fixture would establish only its recorded subset under
 that intervention, not general engine determinism or M1 physics completion.
 
-Historical schema-3 repeats use 14 components. Schema-4 repeats add strict
+Historical schema-3 repeats use 14 components. Schema-4/5 repeats add strict
 mechanic events, `native_delivery_context_equal`, trace watches and terminal
 watches, for 18 whole-trace components. The explicit `native-delivery-context-v1`
-projection excludes only raw absolute delivery layer/UI/queue timestamp values
+projection excludes raw absolute delivery layer/key/queue timestamp values and,
+separately, schema-5 raw touch timestamps with uncharacterized units,
 from the cross-run context gate. Event order/nesting, phase, command/update/
 Scheduler context, queue buttons/steps, delivered dt and all actual input receipts
 remain compared. Separate exact raw timestamp equality/first-difference diagnostics
 and signature hashes are retained, with no relative-time conversion. Runtime
 UIDs/wall times remain diagnostic; mechanic snapshots keep their strict equality.
+Schema 5 retains exact touch ID, view coordinates and native return in that gate.
 
 The [generated fixture matrix](../docs/native-fixture-matrix.md) separately
 declares exact level payloads, owned input plans, pre-ending selected mode
@@ -222,7 +250,8 @@ its generated specifications remain distinct from measured evidence. The
 same-plan constructed controls. `scripts/run-native-delivery-study.ps1` uses a
 confirmed owned matrix as its reference and collects repeated scheduled UI runs,
 retaining positive and negative comparisons. The [interaction ledger](../docs/native-interactions.md)
-keeps confirming evidence pending until it is recorded and audited.
+retains measured schema-4 results; new schema-5 input verification has its own
+[contract and status](../docs/input-observation.md).
 
 The separate scheduler/action timing is grounded in the pinned SDK's scheduler
 API and the upstream Cocos

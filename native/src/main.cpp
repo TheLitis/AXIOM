@@ -196,6 +196,13 @@ double checked(double value) {
     if (!std::isfinite(value)) throw std::runtime_error("Nonfinite selected engine state");
     return value;
 }
+Json touchArguments(CCTouch* touch) {
+    if (!touch) return matjson::makeObject({{"touch_id", nullptr}, {"view_x", nullptr},
+        {"view_y", nullptr}, {"timestamp", nullptr}});
+    auto position = touch->getLocationInView();
+    return matjson::makeObject({{"touch_id", touch->getID()}, {"view_x", checked(position.x)},
+        {"view_y", checked(position.y)}, {"timestamp", checked(touch->getTimestamp())}});
+}
 Json playerState(PlayerObject* player) {
     if (!player) return nullptr;
     auto position = player->getPosition();
@@ -387,18 +394,19 @@ struct Run {
             {"parent_sequence", membership(deliveryStack)}, {"event", event}, {"command_index", command},
             {"in_command", inCommand}, {"update_sequence", membership(updates)},
             {"scheduler_sequence", membership(schedulers)}, {"arguments", arguments},
-            {"phase_before", phase(layer)}, {"phase_after", nullptr},
+            {"phase_before", phase(layer)}, {"phase_after", nullptr}, {"native_return", nullptr},
             {"wall_enter_ns", wallTime()}, {"wall_exit_ns", nullptr},
             {"queue_before", queuedButtons()}, {"queue_after", nullptr},
             {"layer_timestamp_before", checked(layer->m_timestamp)}, {"layer_timestamp_after", nullptr}}));
         deliveryStack.push_back(index);
         return index;
     }
-    void exitDelivery(size_t index) {
+    void exitDelivery(size_t index, Json returned = nullptr) {
         auto& record = attempt()["delivery_events"][index];
         record["queue_after"] = queuedButtons();
         record["layer_timestamp_after"] = checked(layer->m_timestamp);
         record["phase_after"] = phase(layer);
+        record["native_return"] = returned;
         record["wall_exit_ns"] = wallTime();
         if (deliveryStack.empty() || deliveryStack.back() != index) throw std::runtime_error("Delivery nesting mismatch");
         deliveryStack.pop_back();
@@ -639,7 +647,7 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
         active->driver = active->replay ? inputDriver : InputDriver::None;
         auto driver = active->driver;
         active->document = matjson::makeObject({
-            {"schema_version", 4}, {"kind", "native_capture"},
+            {"schema_version", 5}, {"kind", "native_capture"},
             {"provenance", matjson::makeObject({{"origin", "native-engine-capture"}, {"independently_verified", false}, {"state_completeness", "selected_fields_only"}})},
             {"collector", matjson::makeObject({{"id", "axiom.native-capture"}, {"version", "0.1.0"},
                 {"source_commit", AXIOM_SOURCE_COMMIT}, {"source_tree_sha256", AXIOM_SOURCE_TREE_SHA256},
@@ -673,6 +681,7 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
                 "No physical input provenance or human difficulty calibration is established.",
                 "Owned replay suppresses non-injector handleButton requests; UI callback and observation routes forward unknown requests and retain actual receipts.",
                 "Scheduled UILayer callbacks are synthetic in-engine delivery, not OS, hardware, human or dispatcher equivalence.",
+                "Touch callbacks record raw CCTouch IDs, view coordinates and timestamps, not a device or mouse-button identity; null touches retain four null arguments.",
                 "Collision events cover declared watched object pointers and the actual destroyPlayer cause, not complete collision detection.",
                 "Trigger events cover selected bound callbacks; invocation alone proves neither contact nor a completed trigger effect.",
                 "Watched positions and disabled flags are selected raw GameObject fields; runtime unique IDs are diagnostics, not cross-run identities.",
@@ -748,15 +757,22 @@ struct DeliveryPair {
             catch (std::exception const& error) { fail(error.what()); }
         }
     }
-    void close() {
+    void close(Json returned = nullptr) {
         if (row && active.get() == run) {
-            try { run->exitDelivery(*row); }
+            try { run->exitDelivery(*row, returned); }
             catch (std::exception const& error) { fail(error.what()); }
         }
         row.reset();
     }
     ~DeliveryPair() { close(); }
 };
+GJBaseGameLayer* selectedUiOwner(UILayer* ui) {
+    auto run = active.get();
+    // ccTouchCancelled shares an empty native function with other classes.
+    // Compare the actual selected UILayer pointer before reading any UI fields.
+    if (!run || run->terminal || run->layer->m_uiLayer != ui) return nullptr;
+    return ui->m_gameLayer == run->layer ? run->layer : nullptr;
+}
 } // namespace axiom
 
 class $modify(AxiomPlayLayer, PlayLayer) {
@@ -1035,6 +1051,26 @@ class $modify(AxiomPlayer, PlayerObject) {
     }
 };
 class $modify(AxiomUiLayer, UILayer) {
+    bool ccTouchBegan(CCTouch* touch, CCEvent* event) {
+        axiom::DeliveryPair observation(axiom::selectedUiOwner(this), "UILayer::ccTouchBegan", [=] {
+            return axiom::touchArguments(touch);
+        });
+        auto result = UILayer::ccTouchBegan(touch, event);
+        observation.close(result);
+        return result;
+    }
+    void ccTouchEnded(CCTouch* touch, CCEvent* event) {
+        axiom::DeliveryPair observation(axiom::selectedUiOwner(this), "UILayer::ccTouchEnded", [=] {
+            return axiom::touchArguments(touch);
+        });
+        UILayer::ccTouchEnded(touch, event);
+    }
+    void ccTouchCancelled(CCTouch* touch, CCEvent* event) {
+        axiom::DeliveryPair observation(axiom::selectedUiOwner(this), "UILayer::ccTouchCancelled", [=] {
+            return axiom::touchArguments(touch);
+        });
+        UILayer::ccTouchCancelled(touch, event);
+    }
     void keyDown(enumKeyCodes key, double timestamp) {
         axiom::DeliveryPair observation(m_gameLayer, "UILayer::keyDown", [=] {
             return matjson::makeObject({{"key_code", static_cast<int>(key)}, {"timestamp", axiom::checked(timestamp)}});

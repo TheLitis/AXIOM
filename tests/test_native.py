@@ -265,6 +265,16 @@ def collision_capture(*, attempt_id="synthetic-attempt-1", policy="native", driv
 schema4_capture = collision_capture
 
 
+def input_entry_capture(*, attempt_id="synthetic-attempt-1", policy="native", driver="owned-pre-command"):
+    """Schema-5 synthetic input entries; no authenticated native/physical origin."""
+    data = collision_capture(attempt_id=attempt_id, policy=policy, driver=driver)
+    data["schema_version"] = 5
+    return data
+
+
+schema5_capture = input_entry_capture
+
+
 def mechanic_event(document, *, event="PlayerObject::collidedWithObject"):
     phase = {"level_end_animation_started": False, "has_completed_level": False}
     before = deepcopy(document["attempt"]["trace"][1]["state"])
