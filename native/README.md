@@ -5,13 +5,21 @@ Windows x64 / Geometry Dash 2.2081 / Geode 5.8.2. It does not calculate AR, prov
 complete engine determinism, infer collision geometry or estimate human limits.
 Build success and a loaded DLL do not establish gameplay capture or replay fidelity.
 
-Current source writes schema 5 with paired gameplay touch entries and readable
+Ordinary observation and legacy replay retain schema 5 with paired gameplay touch entries and readable
 keyboard/touch inspection. A fresh native-clock run completed with 46 keyboard
 edges across eight codes and five touch begin/end pairs. A separate cube-flat
 owned replay group matched all 18 components; its preceding delivery-context
 failure is retained. No cancellation was observed, and inactive-P2 gameplay
 effects and device origin remain unestablished. Historical schema-4 evidence
 remains separately identified. See [input observations and measured limits](../docs/input-observation.md).
+
+The separate [recorded-replay contract](../docs/recorded-replay.md) uses a schema-2
+plan, schema-6 capture, `recorded-scheduler-stream` intervention and
+`owned-processing-entry` synthetic delivery. Three fresh replays matched the
+source on all 13 declared checks through native completion at command 4894 and
+agreed on all 18 repeat components. The ledger retains the preceding rejected
+export, separate compiled/evaluator identities and independent artifact audits;
+this selected projection does not establish UI/OS equivalence or complete M1.
 
 Build from the repository root with `scripts/build-native.ps1`. The script and
 CMake pin SDK commit `2a5fd87433da47d6bf07221774f0cbb25535ae08` and bindings
@@ -51,8 +59,10 @@ user statement cannot authenticate device origin.
 
 ## Capture semantics
 
-New `native_capture` documents have schema version 5 and one `attempt`. The Python
-reader strictly accepts historical schemas 1, 2, 3 and 4 without fabricating absent fields.
+Observation and legacy replay `native_capture` documents retain schema version 5
+and one `attempt`. Only recorded replay uses schema 6, retaining the complete
+plan in `attempt.replay_bridge`; strict schemas 1–5 keep their original meanings
+and absent fields.
 Each document includes
 the exact SHA-256 of bytes held in `GJGameLevel::m_levelString`, executable, adapter
 and loaded mod binaries; pinned collector source/SDK/bindings identities;
@@ -130,7 +140,8 @@ release. The selected UILayer pointer is checked before reading UI fields,
 including the shared empty cancellation binding.
 
 Existing `keyDown/keyUp` hooks record all raw key codes reaching that gameplay
-layer. The schema-5-only inspector field `input_entry_observations` retains
+layer. The inspector field `input_entry_observations`, introduced in schema 5 and also
+available for schema 6, retains
 `keyboard_edges`, `touch_edges`, names for known raw Cocos codes and queue-change
 observations. Unknown codes remain readable raw values. Touch coordinates/times
 are native API values, not physical screen coordinates or hardware timestamps.
@@ -200,7 +211,7 @@ pointer can exist while inactive.
 ## Isolated clock experiment
 
 The launch argument `--geode:axiom.native-capture.clock-policy=native` selects the
-default observational mode. Two explicit experimental alternatives are accepted
+default observational mode. Explicit experimental alternatives are accepted
 only in `AXIOMSandbox.exe` with `--geode:axiom-sandbox=true`:
 
 | Policy | Intervention |
@@ -208,11 +219,12 @@ only in `AXIOMSandbox.exe` with `--geode:axiom-sandbox=true`:
 | `native` | Forward both update arguments unchanged. |
 | `fixed-base-60` | Deliver `1.0f / 60.0f` to each actual current PlayLayer's inherited game-layer update; leave scheduler arguments unchanged. |
 | `fixed-scheduler-240` | Deliver `1.0f / 240.0f` to each actual scheduler callback from plugin load, including callbacks before capture begins; leave game-layer arguments unchanged. |
+| `recorded-scheduler-stream` | Schema-2 recorded Scheduler arguments/grouping with step `0/1`, paired with `owned-processing-entry`; three fresh replays passed the declared source/repeat projection. |
 
 There is exactly one original invocation per observed callback. The adapter does
 not add an accumulator, repeat callbacks, patch the game's expected tick count,
 override `getModifiedDelta`, change scheduler time scale or separately advance
-actions. Outside the guarded sandbox a fixed selection is refused and cannot
+actions. Outside the guarded sandbox a non-native selection is refused and cannot
 change callback arguments. These are different interventions, with no claimed
 equivalence in wall time or vanilla gameplay. Fixed base dt does not control the
 general action scheduler; fixed scheduler dt can affect every scheduled selector
@@ -221,8 +233,10 @@ and action, and the original scheduler may apply its own time scale internally.
 The environment's `clocks` retains `clock_policy`, `intervention_hook`,
 `step_numerator`, `step_denominator`, `intervention_scope="guarded-sandbox-process"`
 and explicit update/scheduler clock units. Rational steps are identity metadata;
-actual delivered float arguments are recorded separately. Baselines and replay
-plans must use the same exact environment hash. Original update dt and wall
+actual delivered float arguments are recorded separately. Legacy baselines and
+replay plans must use the same exact environment hash. Recorded replay instead
+binds immutable source and target identities separately; its target plan hash
+must match the replay environment, not the source native-clock environment. Original update dt and wall
 timing are explicitly cadence diagnostics; delivered dt, invocation grouping,
 native phases and all selected state remain strict comparison evidence. Passing
 an isolated fixed-clock fixture would establish only its recorded subset under

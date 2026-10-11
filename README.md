@@ -30,6 +30,8 @@ A later **operator-reported manual run under native clocks** recorded Space down
 
 Schema **5** is built and loaded. A fresh native-clock observation completed with **46 keyboard edges across Space, W, Up, A, D, Left, Right and S, plus five touch begin/end pairs**. A separate cube-flat replay group matched all 18 components; the preceding group failed delivery-context equality and remains retained. These observations do not authenticate device origin or establish inactive-P2 gameplay effects; right/middle mouse and native cancellation coverage remain unverified. [Input observations, repeat results and manual test](docs/input-observation.md).
 
+The separate [recorded-replay bridge](docs/recorded-replay.md) reproduced the recorded completion in **three fresh schema-6 replays**: all 106 input receipts and selected dynamics matched the source through command 4894; all 18 repeat components agreed. It forwards recorded Scheduler arguments and synthetic requests at queued-processor entry. The preceding rejected export is retained; UI/OS input equivalence and the complete M1 gate remain unestablished.
+
 | Available now | Evidence and limits |
 |---|---|
 | Raw level-string inspection | Exact source/decoded hashes, settings, object IDs, positions and unknown keys; no collider or trigger simulation |
