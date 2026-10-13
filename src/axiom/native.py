@@ -482,6 +482,8 @@ def _validate_paired_events(capture: dict, name: str) -> None:
     )
     if name == "delivery_events" and capture["schema_version"] >= 5:
         extra |= {"native_return"}
+    if name == "delivery_events" and capture["schema_version"] == 7:
+        extra |= {"thread_id"}
     previous_command, previous_enter = -1, -1
     stack: list[int] = []
     terminal_limit = (terminal["wall_elapsed_seconds"] + 1e-6) * 1e9
@@ -490,6 +492,8 @@ def _validate_paired_events(capture: dict, name: str) -> None:
         if _int(row["sequence"], f"{name}.sequence") != index:
             raise ValueError(f"{name} sequence must start at zero and be contiguous")
         command = _int(row["command_index"], f"{name}.command_index", maximum=terminal["command_index"])
+        if name == "delivery_events" and capture["schema_version"] == 7:
+            _int(row["thread_id"], "delivery.thread_id", minimum=1, maximum=2**32 - 1)
         _bool(row["in_command"], f"{name}.in_command")
         if row["in_command"] and command == 0:
             raise ValueError(f"{name} cannot be in command processing at initial counter zero")
@@ -659,8 +663,8 @@ def _validate_v4(capture: dict) -> None:
 def _load(path: str | Path) -> tuple[dict, str]:
     capture, source_sha256 = read_json(path)
     version = capture.get("schema_version") if isinstance(capture, dict) else None
-    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6}:
-        raise ValueError("native capture schema_version must be integer 1, 2, 3, 4, 5 or 6")
+    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7}:
+        raise ValueError("native capture schema_version must be integer 1, 2, 3, 4, 5, 6 or 7")
     rich = version >= 2
     extended = version >= 3
     contacts = version >= 4
@@ -739,7 +743,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
             "configuration_complete",
             "input_policy",
             "clocks",
-        },
+        }
+        | ({"windows_input_observer"} if version == 7 else set()),
     )
     for key in ("game_executable_sha256", "adapter_binary_sha256"):
         sha256(environment[key], f"environment.{key}")
@@ -747,6 +752,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
         _text(environment[key], f"environment.{key}")
     if environment["platform"] != "windows-x64":
         raise ValueError("Only the windows-x64 native capture contract is supported")
+    if version == 7 and environment["windows_input_observer"] != "raw-dispatch-v1":
+        raise ValueError("Schema 7 requires the explicit Windows input observer environment identity")
     supported_policies = {INPUT_POLICY_V4} if contacts else {INPUT_POLICY, LEGACY_INPUT_POLICY}
     if environment["input_policy"] not in supported_policies:
         raise ValueError("Unsupported native capture input_policy")
@@ -791,6 +798,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
         }
         if version == 6:
             policies = {"recorded-scheduler-stream": ("CCScheduler::update", 0, 1)}
+        elif version == 7:
+            policies = {"native": ("none", 0, 1)}
         if not isinstance(policy, str) or policy not in policies:
             raise ValueError("Unsupported native clock policy")
         hook, numerator, denominator = policies[policy]
@@ -886,7 +895,8 @@ def _load(path: str | Path) -> tuple[dict, str]:
         | ({"blocked_inputs"} if environment["input_policy"] in {INPUT_POLICY, INPUT_POLICY_V4} else set())
         | ({"updates", "scheduler_updates", "phase_events"} if rich else set())
         | ({"input_delivery", "delivery_events", "mechanic_events"} if contacts else set())
-        | ({"replay_bridge"} if version == 6 else set()),
+        | ({"replay_bridge"} if version == 6 else set())
+        | ({"windows_input"} if version == 7 else set()),
     )
     _text(attempt["id"], "attempt.id")
     if contacts:
@@ -1105,6 +1115,12 @@ def _load(path: str | Path) -> tuple[dict, str]:
         _validate_v4(capture)
     if version == 6:
         _validate_recorded_capture(capture)
+    elif version == 7:
+        if attempt["input_source"] != "unknown" or attempt["input_delivery"]["driver"] != "none":
+            raise ValueError("Schema 7 requires ordinary native-clock observation without replay")
+        from .windowsinput import validate_windows_input
+
+        validate_windows_input(capture)
     limitations = capture["limitations"]
     if not isinstance(limitations, list) or len(limitations) > 100:
         raise ValueError("limitations must be an array of at most 100 strings")
@@ -1668,7 +1684,13 @@ def _rich_comparison(baseline: dict, compared: dict) -> dict:
     }
 
 
-def _input_entry_observations(capture: dict) -> dict:
+def _windows_input_summary(capture: dict) -> dict:
+    from .windowsinput import summarize_windows_input
+
+    return summarize_windows_input(capture)
+
+
+def _input_entry_observations(capture: dict, windows_summary: dict | None = None) -> dict:
     """Describe each validated callback entry without assigning a device or action."""
     keyboard, touches = [], []
     event_counts = {event: 0 for event in sorted(KEYBOARD_EVENTS | TOUCH_EVENTS)}
@@ -1723,6 +1745,12 @@ def _input_entry_observations(capture: dict) -> dict:
         else:
             entry.update(event["arguments"])
             touches.append(entry)
+    if capture["schema_version"] == 7:
+        windows_summary = windows_summary if windows_summary is not None else _windows_input_summary(capture)
+        correlations = {row["delivery_sequence"]: row for row in windows_summary["delivery_correlations"]}
+        for row in [*keyboard, *touches]:
+            row["thread_id"] = capture["attempt"]["delivery_events"][row["sequence"]]["thread_id"]
+            row["windows_input_correlation"] = correlations[row["sequence"]]
     return {
         "scope": "recorded_uilayer_callback_entries_and_paired_queue_snapshots",
         "key_code_namespace": "raw_cocos_enumKeyCodes",
@@ -1746,6 +1774,7 @@ def _input_entry_observations(capture: dict) -> dict:
 
 
 def _summary(capture: dict, source_sha256: str) -> dict:
+    windows_summary = _windows_input_summary(capture) if capture["schema_version"] == 7 else None
     warnings = [
         "The supplied file's declared native origin is not authenticated or independently verified.",
         "Recorded state covers selected player fields, not complete world/trigger/input/clock state.",
@@ -1774,6 +1803,10 @@ def _summary(capture: dict, source_sha256: str) -> dict:
     if capture["schema_version"] == 6:
         warnings.append(
             "Schema 6 explicitly intervenes in Scheduler dt and injects owned requests at the first processing entry for each declared batch command; this does not reproduce native wall cadence or source UI callbacks."
+        )
+    if capture["schema_version"] == 7:
+        warnings.append(
+            "Schema 7 retains process-owned Windows ingress and partial public SDK receipts; timestamp-compatible candidates do not authenticate a device or establish causal ownership through the private raw-input queue."
         )
     if capture["provenance"]["origin"] == "synthetic":
         warnings.insert(0, "SYNTHETIC capture fixture, not native Geometry Dash evidence.")
@@ -1848,6 +1881,7 @@ def _summary(capture: dict, source_sha256: str) -> dict:
                 "phase_events",
                 "delivery_events",
                 "mechanic_events",
+                "windows_input",
             }
         },
         "terminal": capture["attempt"]["terminal"],
@@ -1907,10 +1941,11 @@ def _summary(capture: dict, source_sha256: str) -> dict:
             else {}
         ),
         **(
-            {"input_entry_observations": _input_entry_observations(capture)}
+            {"input_entry_observations": _input_entry_observations(capture, windows_summary)}
             if capture["schema_version"] >= 5
             else {}
         ),
+        **({"windows_input_observations": windows_summary} if windows_summary is not None else {}),
         "reported_hook_dt_sum_seconds": sum(row["dt_seconds"] for row in capture["attempt"]["trace"]),
         "limitations": capture["limitations"],
         "warnings": warnings,
