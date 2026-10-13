@@ -32,6 +32,8 @@ Schema **5** is built and loaded. A fresh native-clock observation completed wit
 
 The separate [recorded-replay bridge](docs/recorded-replay.md) reproduced the recorded completion in **three fresh schema-6 replays**: all 106 input receipts and selected dynamics matched the source through command 4894; all 18 repeat components agreed. It forwards recorded Scheduler arguments and synthetic requests at queued-processor entry. The preceding rejected export is retained; UI/OS input equivalence and the complete M1 gate remain unestablished.
 
+The opt-in [Windows input observer](docs/windows-input.md) adds schema-7 Windows message and public Geode streams to gameplay receipts. **Implementation, tests and native build are ready; live Windows qualification is not established.** Two new-package startup attempts and a separate old-package control produced zero exports; their failures and four-file preservation records remain retained. No schema-7 key/button association, hardware authentication or full input equivalence is claimed.
+
 | Available now | Evidence and limits |
 |---|---|
 | Raw level-string inspection | Exact source/decoded hashes, settings, object IDs, positions and unknown keys; no collider or trigger simulation |

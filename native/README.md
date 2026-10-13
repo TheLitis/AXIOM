@@ -21,6 +21,8 @@ agreed on all 18 repeat components. The ledger retains the preceding rejected
 export, separate compiled/evaluator identities and independent artifact audits;
 this selected projection does not establish UI/OS equivalence or complete M1.
 
+The opt-in [Windows observer](../docs/windows-input.md) uses schema 7 only for guarded sandbox native-clock capture with driver `none` and `windows-input=raw-dispatch-v1`. It retains selected Windows ingress and public Geode snapshots separately from UILayer/queue/player receipts. Implementation, software checks and native build are ready, but live Windows delivery is not established: two new-package startup attempts and an old-package control produced no exports. The ledger retains failures and preservation records; schemas 5/6 keep their previous modes and evidence.
+
 Build from the repository root with `scripts/build-native.ps1`. The script and
 CMake pin SDK commit `2a5fd87433da47d6bf07221774f0cbb25535ae08` and bindings
 commit `2a8b5c489ce8b49e7061b0543aa2bc5b22570063`. Packaging uses
@@ -60,8 +62,9 @@ user statement cannot authenticate device origin.
 ## Capture semantics
 
 Observation and legacy replay `native_capture` documents retain schema version 5
-and one `attempt`. Only recorded replay uses schema 6, retaining the complete
-plan in `attempt.replay_bridge`; strict schemas 1–5 keep their original meanings
+and one `attempt`. Recorded replay uses schema 6, retaining the complete
+plan in `attempt.replay_bridge`. Only the opted-in Windows observer uses schema 7
+with `attempt.windows_input`; strict schemas 1–6 keep their original meanings
 and absent fields.
 Each document includes
 the exact SHA-256 of bytes held in `GJGameLevel::m_levelString`, executable, adapter
@@ -141,7 +144,7 @@ including the shared empty cancellation binding.
 
 Existing `keyDown/keyUp` hooks record all raw key codes reaching that gameplay
 layer. The inspector field `input_entry_observations`, introduced in schema 5 and also
-available for schema 6, retains
+available for schemas 6/7, retains
 `keyboard_edges`, `touch_edges`, names for known raw Cocos codes and queue-change
 observations. Unknown codes remain readable raw values. Touch coordinates/times
 are native API values, not physical screen coordinates or hardware timestamps.
