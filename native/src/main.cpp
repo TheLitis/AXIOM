@@ -5,6 +5,8 @@
 #include <Geode/modify/CCScheduler.hpp>
 #include <Geode/modify/UILayer.hpp>
 #include <Geode/modify/EffectGameObject.hpp>
+#include <Geode/utils/Keyboard.hpp>
+#include "WindowsInputObserver.hpp"
 #include <Windows.h>
 #include <bcrypt.h>
 #include <algorithm>
@@ -13,6 +15,7 @@
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <limits>
 #include <memory>
 #include <set>
 #include <stdexcept>
@@ -36,6 +39,9 @@ InputDriver inputDriver = InputDriver::Owned;
 std::vector<int> watchGroups;
 std::string clockSelectionError;
 std::string deliverySelectionError;
+bool windowsInputObserver = false;
+geode::comm::ListenerHandle windowsKeyboardListener;
+geode::comm::ListenerHandle windowsMouseListener;
 size_t updateDepth = 0;
 size_t schedulerDepth = 0;
 size_t phaseDepth = 0;
@@ -89,6 +95,17 @@ void selectDelivery() {
         offset = end + 1;
         if (offset == groups.size()) throw std::runtime_error("Trailing watched-group separator");
     }
+}
+void selectWindowsObserver() {
+    auto choice = Mod::get()->getLaunchArgument("windows-input");
+    if (!choice) return;
+    if (*choice != "raw-dispatch-v1" || clockPolicy != ClockPolicy::Native ||
+            !Mod::get()->getLaunchFlag("capture") || Mod::get()->getLaunchFlag("replay") ||
+            Mod::get()->getSettingValue<bool>("replay-enabled") ||
+            _wcsicmp(executablePath().filename().c_str(), L"AXIOMSandbox.exe") != 0 ||
+            !Loader::get()->getLaunchFlag("axiom-sandbox"))
+        throw std::runtime_error("Windows input observer requires explicit native-clock capture/non-replay guarded sandbox");
+    windowsInputObserver = true;
 }
 
 // Environment documents contain no floating point values. Sorting keys recursively
@@ -180,7 +197,7 @@ Json environment() {
         manifest.push(matjson::makeObject({{"id", std::string(mod->getID())},
             {"version", mod->getVersion().toNonVString()}, {"binary_sha256", fileSha(binary)}}));
     }
-    return matjson::makeObject({
+    auto result = matjson::makeObject({
         {"game_executable_sha256", fileSha(executablePath())}, {"game_version", "2.2081"},
         {"geode_version", Loader::get()->getVersion().toNonVString()},
         {"adapter_binary_sha256", fileSha(Mod::get()->getBinaryPath())},
@@ -196,6 +213,8 @@ Json environment() {
             {"intervention_scope", "guarded-sandbox-process"},
             {"update_unit", "GJBaseGameLayer::update_call_index"},
             {"scheduler_unit", "CCScheduler::update_call_index"}})}});
+    if (windowsInputObserver) result["windows_input_observer"] = "raw-dispatch-v1";
+    return result;
 }
 double checked(double value) {
     if (!std::isfinite(value)) throw std::runtime_error("Nonfinite selected engine state");
@@ -373,8 +392,14 @@ struct Run {
     size_t nextCadence = 0;
     size_t nextBatch = 0;
     std::optional<uint64_t> processedBatchCommand;
+    windowsinput::SessionPtr windowsSession;
+    Json windowsSdkEvents = Json::array();
     explicit Run(GJBaseGameLayer* owner) : layer(owner) { layer->retain(); }
-    ~Run() { for (auto const& watch : watches) watch.second->release(); layer->release(); }
+    ~Run() {
+        if (windowsSession) windowsinput::stop(windowsSession);
+        for (auto const& watch : watches) watch.second->release();
+        layer->release();
+    }
     Json& attempt() { return document["attempt"]; }
     void error(std::string const& message) {
         complete = false;
@@ -438,6 +463,7 @@ struct Run {
             {"wall_enter_ns", wallTime()}, {"wall_exit_ns", nullptr},
             {"queue_before", queuedButtons()}, {"queue_after", nullptr},
             {"layer_timestamp_before", checked(layer->m_timestamp)}, {"layer_timestamp_after", nullptr}}));
+        if (windowsSession) records[index]["thread_id"] = GetCurrentThreadId();
         deliveryStack.push_back(index);
         return index;
     }
@@ -553,6 +579,7 @@ struct Run {
     }
     void finish(char const* outcome, char const* event) {
         if (terminal) return;
+        if (windowsSession) windowsinput::stop(windowsSession);
         terminal = true;
         attempt()["terminal"] = matjson::makeObject({{"outcome", outcome}, {"event", event},
             {"command_index", command}, {"wall_elapsed_seconds", std::chrono::duration<double>(Clock::now() - start).count()},
@@ -560,6 +587,18 @@ struct Run {
             {"watched_objects", watchedState()},
             {"scheduler_sequence", membership(schedulers)}});
         terminalSnapshotReady = true;
+    }
+    void windowsSdkEvent(char const* event, Json data) {
+        if (!windowsSession || terminal) return;
+        if (windowsSdkEvents.size() >= windowsinput::MaxSdkEvents) {
+            windowsinput::sdkOverflow(windowsSession);
+            throw std::runtime_error("Windows SDK input event limit reached");
+        }
+        windowsSdkEvents.push(matjson::makeObject({{"sequence", static_cast<uint64_t>(windowsSdkEvents.size())},
+            {"event", event}, {"thread_id", GetCurrentThreadId()}, {"wall_time_ns", wallTime()},
+            {"command_index", command}, {"in_command", inCommand}, {"update_sequence", membership(updates)},
+            {"scheduler_sequence", membership(schedulers)}, {"phase", phase(layer)},
+            {"queue_snapshot", queuedButtons()}, {"data", data}}));
     }
     void loadRecordedSchedule(Json const& data) {
         if (!digest(string(data["source_capture_sha256"])) || !digest(string(data["source_environment_sha256"])))
@@ -713,6 +752,18 @@ void exportRun() {
         log::error("AXIOM capture discarded after callbacks closed; terminal snapshot unavailable; no artifact");
         return;
     }
+    if (run->windowsSession) {
+        try {
+            auto observation = windowsinput::snapshot(run->windowsSession, run->windowsSdkEvents);
+            run->attempt()["windows_input"] = observation;
+            auto const& integrity = observation["integrity"];
+            if (integrity["overflow_count"].asUInt().unwrap() || integrity["read_error_count"].asUInt().unwrap() ||
+                    integrity["pending_callbacks_at_snapshot"].asUInt().unwrap() || integrity["errors"].size())
+                run->error("Windows input observer incomplete; see retained windows_input integrity diagnostics");
+        } catch (std::exception const& error) {
+            run->error(std::string("Windows input observer snapshot failed: ") + error.what());
+        }
+    }
     run->document["integrity"]["recording_complete"] = run->complete;
     run->document["integrity"]["dropped_records"] = run->dropped;
     try {
@@ -771,7 +822,7 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
         active->driver = active->replay ? inputDriver : InputDriver::None;
         auto driver = active->driver;
         active->document = matjson::makeObject({
-            {"schema_version", driver == InputDriver::ProcessingEntry ? 6 : 5}, {"kind", "native_capture"},
+            {"schema_version", windowsInputObserver ? 7 : driver == InputDriver::ProcessingEntry ? 6 : 5}, {"kind", "native_capture"},
             {"provenance", matjson::makeObject({{"origin", "native-engine-capture"}, {"independently_verified", false}, {"state_completeness", "selected_fields_only"}})},
             {"collector", matjson::makeObject({{"id", "axiom.native-capture"}, {"version", "0.1.0"},
                 {"source_commit", AXIOM_SOURCE_COMMIT}, {"source_tree_sha256", AXIOM_SOURCE_TREE_SHA256},
@@ -817,6 +868,17 @@ void begin(PlayLayer* layer, bool uncertainStart = false) {
                 "Fixed clocks are isolated-process interventions; equivalence to ordinary gameplay is unverified.",
                 "Original update dt and wall timing are cadence diagnostics; delivered dt and call grouping are retained."})}});
         active->resolveWatches();
+        if (windowsInputObserver) {
+            if (active->replay || clockPolicy != ClockPolicy::Native || driver != InputDriver::None)
+                throw std::runtime_error("Windows input observation is native-clock capture only");
+            active->attempt()["windows_input"] = nullptr;
+            active->windowsSession = windowsinput::begin(active->start);
+            active->document["limitations"].push("Windows observation is restricted to process-owned windows during this opted-in sandbox attempt; foreground raw keyboard/button metadata only, with no device IDs or cursor/movement payloads.");
+            active->document["limitations"].push("Windows raw input reaches a separate-thread Geode queue; packet-to-SDK timestamp/field associations are candidates without a captured private queue identity.");
+            active->document["limitations"].push("Geode SDK input snapshots are passive global-listener receipts, not the final mutable event or dispatcher result; an earlier key-specific receiver can prevent this observation.");
+            active->document["limitations"].push("The source SDK synthesizes focus-loss keyboard releases and has controller input paths; an observed SDK or UILayer callback alone does not authenticate Windows packet, hardware or human origin.");
+            active->document["limitations"].push("Windows callback exit may follow the native terminal event during the bounded 25ms snapshot drain; unfinished callbacks or attachment/restoration/read/overflow errors invalidate complete evidence.");
+        }
         if (driver == InputDriver::ProcessingEntry) {
             active->attempt()["replay_bridge"] = nullptr;
             active->document["limitations"].push("Recorded scheduler replay delivers the source float32 dt stream once per actual scheduler callback; OS timing and hardware input are not replayed.");
@@ -904,6 +966,62 @@ GJBaseGameLayer* selectedUiOwner(UILayer* ui) {
     // Compare the actual selected UILayer pointer before reading any UI fields.
     if (!run || run->terminal || run->layer->m_uiLayer != ui) return nullptr;
     return ui->m_gameLayer == run->layer ? run->layer : nullptr;
+}
+void setupWindowsListeners() {
+    windowsinput::setMainScopes([] { ++eventDepth; }, [] { --eventDepth; flushPending(); });
+    if (!windowsInputObserver) return;
+    windowsKeyboardListener = KeyboardInputEvent().listen([](KeyboardInputData& data) {
+        // Global SDK events need not always originate on the game's thread.
+        // Check the independent observer first, before traversing active Run.
+        if (!windowsinput::onMainThread()) return ListenerResult::Propagate;
+        EventScope scope;
+        auto run = active.get();
+        if (run && run->windowsSession && !run->terminal) {
+            try {
+                char const* action;
+                switch (data.action) {
+                    case KeyboardInputData::Action::Press: action = "press"; break;
+                    case KeyboardInputData::Action::Release: action = "release"; break;
+                    case KeyboardInputData::Action::Repeat: action = "repeat"; break;
+                    default: throw std::runtime_error("Unsupported SDK keyboard action");
+                }
+                run->windowsSdkEvent("Geode::KeyboardInputEvent", matjson::makeObject({
+                    {"key_code", static_cast<int>(data.key)}, {"action", action},
+                    {"native_code", data.native.code}, {"native_extra", data.native.extra},
+                    {"timestamp", checked(data.timestamp)}, {"modifiers", data.modifiers.value}}));
+            } catch (std::exception const& error) { fail(error.what()); }
+        }
+        // No mutable field is changed and this listener never consumes input.
+        return ListenerResult::Propagate;
+    }, std::numeric_limits<int>::min());
+    windowsMouseListener = MouseInputEvent().listen([](MouseInputData& data) {
+        if (!windowsinput::onMainThread()) return ListenerResult::Propagate;
+        EventScope scope;
+        auto run = active.get();
+        if (run && run->windowsSession && !run->terminal) {
+            try {
+                char const* button;
+                switch (data.button) {
+                    case MouseInputData::Button::Left: button = "left"; break;
+                    case MouseInputData::Button::Right: button = "right"; break;
+                    case MouseInputData::Button::Middle: button = "middle"; break;
+                    case MouseInputData::Button::Button4: button = "button4"; break;
+                    case MouseInputData::Button::Button5: button = "button5"; break;
+                    default: throw std::runtime_error("Unsupported SDK mouse button");
+                }
+                char const* action;
+                switch (data.action) {
+                    case MouseInputData::Action::Press: action = "press"; break;
+                    case MouseInputData::Action::Release: action = "release"; break;
+                    default: throw std::runtime_error("Unsupported SDK mouse action");
+                }
+                run->windowsSdkEvent("Geode::MouseInputEvent", matjson::makeObject({
+                    {"button", button}, {"action", action}, {"timestamp", checked(data.timestamp)},
+                    {"modifiers", data.modifiers.value}}));
+            } catch (std::exception const& error) { fail(error.what()); }
+        }
+        return ListenerResult::Propagate;
+    }, std::numeric_limits<int>::min());
 }
 } // namespace axiom
 
@@ -1288,6 +1406,8 @@ $on_mod(Loaded) {
     catch (std::exception const& error) { axiom::clockSelectionError = error.what(); }
     if (!axiom::clockSelectionError.empty()) log::error("AXIOM clock experiment refused: {}", axiom::clockSelectionError);
     try { axiom::selectDelivery(); }
+    catch (std::exception const& error) { axiom::deliverySelectionError = error.what(); }
+    try { axiom::selectWindowsObserver(); axiom::setupWindowsListeners(); }
     catch (std::exception const& error) { axiom::deliverySelectionError = error.what(); }
     if (!axiom::deliverySelectionError.empty()) log::error("AXIOM delivery/watch experiment refused: {}", axiom::deliverySelectionError);
     log::info("AXIOM M1 adapter loaded; local capture/replay disabled by default; selected-state only; SDK {} bindings {}", AXIOM_SDK_COMMIT, AXIOM_BINDINGS_COMMIT);
