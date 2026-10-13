@@ -117,7 +117,7 @@ $manifest = [ordered]@{
     runtime_directory=$runtime; automatic_start=[bool]$AutomaticStart
     analysis_source_commit=(& git -C $workspace rev-parse HEAD).Trim()
     source_file_sha256=[ordered]@{}; native_package=$null; level_sha256=$null
-    process_id=$null; process_started_at_utc=$null; arguments=@()
+    process_id=$null; process_started_at_utc=$null; process_exit_code=$null; arguments=@()
     exported_captures=@(); inspection=$null; analysis=$null; preservation=$null
     input_provenance='unknown'; human_authorship='requires_separate_user_statement'
     hardware_authentication='not_established'; ordinary_input_equivalence='not_established'; m1_gate='not_established'
@@ -165,6 +165,7 @@ try {
     Write-WindowsObservationJson (Join-Path $out 'manifest.json') $manifest
     $windowStyle = if ($AutomaticStart) { 'Hidden' } else { 'Normal' }
     $process = Start-Process -FilePath (Join-Path $runtime 'AXIOMSandbox.exe') -WorkingDirectory $runtime -ArgumentList $arguments -WindowStyle $windowStyle -PassThru -RedirectStandardOutput (Join-Path $out 'stdout.txt') -RedirectStandardError (Join-Path $out 'stderr.txt')
+    $ownedProcessHandle = $process.Handle
     $manifest.process_id = $process.Id
     $manifest.process_started_at_utc = $process.StartTime.ToUniversalTime().ToString('o')
     Write-WindowsObservationJson (Join-Path $out 'manifest.json') $manifest
@@ -188,7 +189,10 @@ try {
                 $newCaptures = @()
             }
         }
-        if ($process.HasExited) { throw 'Owned sandbox exited before any export.' }
+        if ($process.HasExited) {
+            $manifest.process_exit_code = $process.ExitCode
+            throw "Owned sandbox exited before any export (exit code $($manifest.process_exit_code))."
+        }
         Start-Sleep -Milliseconds 200
     }
     # Do not silently exclude changed files merely because their names predate
