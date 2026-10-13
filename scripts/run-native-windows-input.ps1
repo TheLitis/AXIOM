@@ -156,7 +156,8 @@ try {
             Assert-WindowsObservationCapturePath $_.FullName $false
             $before[$_.Name] = Get-WindowsObservationHash $_.FullName
         }
-    $arguments = @('--geode:axiom-sandbox', '--geode:axiom.native-capture.clock-policy=native',
+    $arguments = @('--geode:axiom-sandbox', '--geode:axiom.native-capture.capture',
+        '--geode:axiom.native-capture.clock-policy=native',
         '--geode:axiom.native-capture.windows-input=raw-dispatch-v1')
     if (-not $AutomaticStart) { $arguments += '--geode:axiom-sandbox-manual' }
     $manifest.arguments = $arguments
