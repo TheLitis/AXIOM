@@ -32,6 +32,10 @@ def parser():
     oracle.add_argument("input", type=Path)
     native = commands.add_parser("native", help="Inspect a native observer capture and its recorded limits")
     native.add_argument("input", type=Path)
+    cadence = commands.add_parser(
+        "native-cadence", help="Describe recorded hook wall cadence and dt without performance attribution"
+    )
+    cadence.add_argument("input", type=Path)
     compare = commands.add_parser(
         "native-compare", help="Compare recorded subsets of repeated native replays"
     )
@@ -95,6 +99,7 @@ def parser():
         replay,
         oracle,
         native,
+        cadence,
         compare,
         delivery,
         recorded_plan,
@@ -149,6 +154,10 @@ def main(argv=None):
             from .native import inspect_native_capture
 
             result = inspect_native_capture(args.input)
+        elif args.command == "native-cadence":
+            from .cadence import inspect_native_cadence
+
+            result = inspect_native_cadence(args.input)
         elif args.command == "native-compare":
             from .native import compare_native_captures
 
