@@ -34,6 +34,8 @@ The separate [recorded-replay bridge](docs/recorded-replay.md) reproduced the re
 
 The opt-in [Windows input observer](docs/windows-input.md) adds schema-7 Windows message and public Geode streams to gameplay receipts. **Implementation, tests and native build are ready; live Windows qualification is not established.** Two new-package startup attempts and a separate old-package control produced zero exports; their failures and four-file preservation records remain retained. No schema-7 key/button association, hardware authentication or full input equivalence is claimed.
 
+The separate [native cadence diagnostics](docs/native-cadence.md) analyze retained captures without launching the game. An archived source and three replays passed 2496 independent arithmetic checks: delivered Scheduler arguments still match exactly, while incoming arguments and wall timing differ. Count/wall ratios and stream entry rates remain separate from render FPS, recording overhead and difficulty.
+
 | Available now | Evidence and limits |
 |---|---|
 | Raw level-string inspection | Exact source/decoded hashes, settings, object IDs, positions and unknown keys; no collider or trigger simulation |
@@ -48,6 +50,7 @@ The opt-in [Windows input observer](docs/windows-input.md) adds schema-7 Windows
 | Raw mechanics capture and conditioned checks | Schema-3 gravity, size, speed and actual dual flag; schema-2 fixture sequences and input-response conditions in both sampled states; [mechanics contract and evidence](docs/native-mechanics-matrix.md) |
 | Collision, trigger and delivery observations | Schema-4 contact flags, watched objects, paired native effects and queue receipts; schema-3 fixture gates, controlled variants and a separate synthetic UI-route comparator; [contract and evidence](docs/native-interactions.md) |
 | Keyboard and gameplay touch entries | Schema-5 native key/touch entries, paired queue changes and bounded replay evidence; unknown device provenance; [contract](docs/input-observation.md) |
+| Native cadence diagnostics | Capture schemas 1–7; separate command ratios, original/delivered arguments, paired wall unions, nesting and phases; [contract and archived results](docs/native-cadence.md) |
 | Portable HTML and JSON | Interactive route selection, window/first-completion plots, source identity and interpretation limits; works offline |
 | Research framework | 64 proposed factors, telemetry design, baseline comparisons and a gated implementation roadmap |
 
@@ -76,6 +79,7 @@ axiom timing examples/timing.json --trials 20000 --seed 42 --html reports/timing
 axiom cohort examples/cohort.json --bootstrap 1000 --seed 42 --html reports/cohort.html
 axiom trials examples/trials.json --json reports/trials.json
 axiom native examples/native/synthetic-capture-a.json --json reports/native.json
+axiom native-cadence examples/native/synthetic-clock-a.json --json reports/native-cadence.json
 axiom native-compare examples/native/synthetic-capture-a.json examples/native/synthetic-capture-b.json --json reports/native-comparison.json
 axiom native-compare examples/native/synthetic-clock-a.json examples/native/synthetic-clock-b.json --json reports/native-clock-comparison.json
 axiom native-compare examples/native/synthetic-mechanics-a.json examples/native/synthetic-mechanics-b.json --json reports/native-mechanics-comparison.json

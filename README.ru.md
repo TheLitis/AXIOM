@@ -40,6 +40,8 @@ Schema 3 нативной записи сохраняет исходные гр�
 
 **Это исследовательский прототип; полный критерий M1 ещё не закрыт, человеческая модель ещё не откалибрована.** Совпадение файлов доказывает только согласованность записанного подмножества, происхождение файла само по себе не аутентифицировано. Окна пока передаются извне; примеры полностью синтетические. Реальных рейтингов GRIEF, Slaughterhouse или других уровней пока нет. [Нативный адаптер: запуск и проверки](docs/native-adapter.ru.md).
 
+Отдельная [диагностика нативных вызовов](docs/native-cadence.ru.md) анализирует сохранённые файлы без запуска игры. Архивный источник и три повтора прошли 2496 независимых арифметических проверок: переданные аргументы Scheduler по-прежнему точно совпадают, а входящие аргументы и настенное время различаются. Отношение числа команд ко времени и частота входов отделены от FPS рендера, накладных расходов записи и сложности.
+
 ## Запуск в PowerShell
 
 ```powershell
@@ -50,6 +52,7 @@ python -m venv .venv
 .venv\Scripts\python.exe -m axiom demo
 .venv\Scripts\python.exe -m axiom fixtures examples/native/mechanics-matrix.json
 .venv\Scripts\python.exe -m axiom fixtures examples/native/interaction-matrix.json
+.venv\Scripts\python.exe -m axiom native-cadence examples/native/synthetic-clock-a.json --json reports/native-cadence.json
 .venv\Scripts\python.exe -m axiom native-compare examples/native/synthetic-mechanics-a.json examples/native/synthetic-mechanics-b.json
 ```
 
