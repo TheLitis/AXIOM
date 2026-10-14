@@ -36,6 +36,26 @@ def parser():
         "native-cadence", help="Describe recorded hook wall cadence and dt without performance attribution"
     )
     cadence.add_argument("input", type=Path)
+    startup = commands.add_parser(
+        "native-startup", help="Inspect retained startup diagnostics without inferring an exit cause"
+    )
+    startup.add_argument("input", type=Path, help="Hash-bound startup evidence bundle")
+    startup_baseline = commands.add_parser(
+        "native-startup-baseline", help="Record bounded runtime-log identity before a declared launch"
+    )
+    startup_baseline.add_argument("runtime", type=Path)
+    startup_baseline.add_argument("--output", type=Path, required=True, help="New inventory JSON path")
+    startup_baseline.set_defaults(json=None)
+    startup_collect = commands.add_parser(
+        "native-startup-collect", help="Retain bounded startup artifacts; does not launch the game"
+    )
+    startup_collect.add_argument("runtime", type=Path)
+    startup_collect.add_argument("--attempt-manifest", type=Path, required=True)
+    startup_collect.add_argument("--output", type=Path, required=True, help="New evidence directory")
+    startup_collect.add_argument(
+        "--baseline", type=Path, help="Prelaunch inventory; otherwise retrospectively unbound"
+    )
+    startup_collect.set_defaults(json=None)
     compare = commands.add_parser(
         "native-compare", help="Compare recorded subsets of repeated native replays"
     )
@@ -100,6 +120,7 @@ def parser():
         oracle,
         native,
         cadence,
+        startup,
         compare,
         delivery,
         recorded_plan,
@@ -158,6 +179,22 @@ def main(argv=None):
             from .cadence import inspect_native_cadence
 
             result = inspect_native_cadence(args.input)
+        elif args.command == "native-startup":
+            from .startup import inspect_startup_evidence
+
+            if args.json and args.json.resolve().is_relative_to(args.input.resolve().parent):
+                raise ValueError(
+                    "Startup inspection JSON must remain outside the retained evidence directory"
+                )
+            result = inspect_startup_evidence(args.input)
+        elif args.command == "native-startup-baseline":
+            from .startup import snapshot_startup_logs
+
+            result = snapshot_startup_logs(args.runtime, args.output)
+        elif args.command == "native-startup-collect":
+            from .startup import collect_startup_evidence
+
+            result = collect_startup_evidence(args.runtime, args.attempt_manifest, args.output, args.baseline)
         elif args.command == "native-compare":
             from .native import compare_native_captures
 

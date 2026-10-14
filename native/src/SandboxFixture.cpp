@@ -1,6 +1,7 @@
 // An explicit, isolated engine smoke test. Inert in the normal game executable.
 #include <Geode/Geode.hpp>
 #include <Geode/cocos/platform/win32/CCFileUtilsWin32.h>
+#include <Geode/modify/AppDelegate.hpp>
 #include <Geode/modify/CCFileUtilsWin32.hpp>
 #include <Geode/modify/MenuLayer.hpp>
 #include <Geode/utils/file.hpp>
@@ -51,6 +52,16 @@ void launchSandboxFixture(std::string const& raw) {
 }
 }
 
+class $modify(AxiomSandboxApp, AppDelegate) {
+    bool applicationDidFinishLaunching() {
+        bool scoped = sandboxEnabled();
+        if (scoped) log::info("AXIOM sandbox app init entered");
+        bool result = AppDelegate::applicationDidFinishLaunching();
+        if (scoped) log::info("AXIOM sandbox app init returned: {}", result ? "true" : "false");
+        return result;
+    }
+};
+
 class $modify(AxiomSandboxFiles, CCFileUtilsWin32) {
     gd::string getWritablePath() {
         if (sandboxEnabled()) return sandboxWritablePath();
@@ -73,7 +84,11 @@ class $modify(AxiomSandboxMenu, MenuLayer) {
         launchSandboxFixture(m_fields->fixtureRaw);
     }
     bool init() {
-        if (!MenuLayer::init()) return false;
+        bool scoped = sandboxEnabled();
+        if (scoped) log::info("AXIOM sandbox menu init entered");
+        bool initialized = MenuLayer::init();
+        if (scoped) log::info("AXIOM sandbox menu init returned: {}", initialized ? "true" : "false");
+        if (!initialized) return false;
         static bool started = false;
         if (!sandboxEnabled() || started) return true;
         started = true;

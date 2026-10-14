@@ -13,6 +13,7 @@ $workspace = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $workspace '.venv/Scripts/python.exe'
 $utf8 = [Text.UTF8Encoding]::new($false)
 . (Join-Path $PSScriptRoot 'native-experiment-state.ps1')
+. (Join-Path $PSScriptRoot 'native-startup.ps1')
 function Get-WindowsObservationHash([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
@@ -109,6 +110,7 @@ $captures = Join-Path $profile 'captures'
 Assert-WindowsObservationCapturePath $captures $true
 $process = $null
 $analysisProcess = $null
+$startupBaseline = $null
 $captureStreams = @()
 $priorExecutionState = $null
 $manifest = [ordered]@{
@@ -118,6 +120,8 @@ $manifest = [ordered]@{
     analysis_source_commit=(& git -C $workspace rev-parse HEAD).Trim()
     source_file_sha256=[ordered]@{}; native_package=$null; level_sha256=$null
     process_id=$null; process_started_at_utc=$null; process_exit_code=$null; arguments=@()
+    timeout_reached=$false; process_cleanup=$null; cleanup_errors=@()
+    startup_diagnostics=$null; startup_diagnostics_error=$null
     exported_captures=@(); inspection=$null; analysis=$null; preservation=$null
     input_provenance='unknown'; human_authorship='requires_separate_user_statement'
     hardware_authentication='not_established'; ordinary_input_equivalence='not_established'; m1_gate='not_established'
@@ -136,7 +140,7 @@ try {
         path=$package; sha256=(Get-WindowsObservationHash $package)
         dll_sha256=(Get-WindowsObservationDllHash $package); native_tree_sha256=(Get-WindowsObservationTree)
     }
-    $sources = @('scripts/run-native-windows-input.ps1', 'scripts/native-experiment-state.ps1',
+    $sources = @('scripts/run-native-windows-input.ps1', 'scripts/native-experiment-state.ps1', 'scripts/native-startup.ps1',
         'scripts/prepare-native-sandbox.ps1', 'native/CMakeLists.txt', 'native/mod.json')
     $sources += @(Get-ChildItem -LiteralPath (Join-Path $workspace 'native/src') -Recurse -File |
         Where-Object { $_.Extension -in @('.cpp', '.hpp') } |
@@ -161,6 +165,9 @@ try {
         '--geode:axiom.native-capture.windows-input=raw-dispatch-v1')
     if (-not $AutomaticStart) { $arguments += '--geode:axiom-sandbox-manual' }
     $manifest.arguments = $arguments
+    Assert-WindowsObservationFrozen
+    $startupBaseline = Join-Path $out 'startup-log-baseline.json'
+    $startupBaselineRun = Invoke-AxiomStartupTool $workspace $out @('native-startup-baseline', $runtime, '--output', $startupBaseline) 'startup-baseline'
     Assert-WindowsObservationFrozen
     Write-WindowsObservationJson (Join-Path $out 'manifest.json') $manifest
     $windowStyle = if ($AutomaticStart) { 'Hidden' } else { 'Normal' }
@@ -195,6 +202,9 @@ try {
         }
         Start-Sleep -Milliseconds 200
     }
+    if (-not $newCaptures.Count -and $timer.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+        $manifest.timeout_reached = $true
+    }
     # Do not silently exclude changed files merely because their names predate
     # this process. Retain a separate copy before rejecting this experiment.
     foreach ($capture in @(Get-ChildItem -LiteralPath $captures -File -Filter '*.json' -ErrorAction SilentlyContinue)) {
@@ -215,7 +225,10 @@ try {
         finally { $targetStream.Dispose(); $captureStreams[$index].Dispose() }
         $manifest.exported_captures += [ordered]@{path=$destination; sha256=(Get-WindowsObservationHash $destination); role='new'}
     }
-    if ($newCaptures.Count -ne 1) { throw 'Expected one capture from this attempt; all discovered exports were retained.' }
+    if ($newCaptures.Count -ne 1) {
+        if ($manifest.timeout_reached) { throw "Owned sandbox reached the $TimeoutSeconds-second deadline without a capture export." }
+        throw 'Expected one capture from this attempt; all discovered exports were retained.'
+    }
     if (@($manifest.exported_captures | Where-Object { $_.role -eq 'changed-existing' }).Count) {
         throw 'Existing capture bytes changed during observation; changed evidence was retained separately.'
     }
@@ -261,9 +274,22 @@ try {
 } finally {
     try {
         foreach ($stream in $captureStreams) { $stream.Dispose() }
+        if ($process) {
+            $exited = $process.HasExited
+            $manifest.process_cleanup = [ordered]@{
+                exit_observed_before_cleanup=[bool]$exited
+                termination_requested=(-not $exited)
+                natural_exit_code=$(if ($exited) { $process.ExitCode } else { $null })
+            }
+            if ($exited) { $manifest.process_exit_code = $process.ExitCode }
+        }
         try { if ($analysisProcess) { Stop-AxiomOwnedProcess $analysisProcess } }
         finally { if ($process) { Stop-AxiomOwnedProcess $process } }
-    } catch { $manifest.status='observation_not_established'; $manifest.error=$_.Exception.Message; throw }
+    } catch {
+        $manifest.status='observation_not_established'; $manifest.cleanup_errors += $_.Exception.Message
+        if (-not $manifest.error) { $manifest.error=$_.Exception.Message }
+        throw
+    }
     finally {
         try {
             Restore-AxiomExperimentSnapshot $snapshot
@@ -272,16 +298,44 @@ try {
             Write-WindowsObservationJson $preservationPath $preserved
             $manifest.preservation = [ordered]@{path=$preservationPath; sha256=(Get-WindowsObservationHash $preservationPath)}
             if (-not $preserved.all_preserved) { throw 'Four experiment files were not restored exactly.' }
-        } catch { $manifest.status='observation_not_established'; $manifest.error=$_.Exception.Message; throw }
+        } catch {
+            $manifest.status='observation_not_established'; $manifest.cleanup_errors += $_.Exception.Message
+            if (-not $manifest.error) { $manifest.error=$_.Exception.Message }
+            throw
+        }
         finally {
             try {
                 if ($priorExecutionState -and -not [AxiomWindowsObservationPower]::SetThreadExecutionState($priorExecutionState)) {
                     throw 'Unable to restore prior execution-state request.'
                 }
-            } catch { $manifest.status='observation_not_established'; $manifest.error=$_.Exception.Message; throw }
+            } catch {
+                $manifest.status='observation_not_established'; $manifest.cleanup_errors += $_.Exception.Message
+                if (-not $manifest.error) { $manifest.error=$_.Exception.Message }
+                throw
+            }
             finally {
                 $manifest.finished_at_utc=[DateTime]::UtcNow.ToString('o')
+                $startupNewFailure = $false
+                try {
+                    if (Test-Path -LiteralPath $runtime -PathType Container) {
+                        $startupSnapshot = Join-Path $out 'startup-manifest-snapshot.json'
+                        Write-WindowsObservationJson $startupSnapshot $manifest
+                        $startupArguments = @('native-startup-collect', $runtime, '--attempt-manifest', $startupSnapshot, '--output', (Join-Path $out 'startup'))
+                        if ($startupBaseline -and (Test-Path -LiteralPath $startupBaseline -PathType Leaf)) {
+                            $startupArguments += @('--baseline', $startupBaseline)
+                        }
+                        $startupCollection = Invoke-AxiomStartupTool $workspace $out $startupArguments 'startup-collect'
+                        $manifest.startup_diagnostics = Get-Content -LiteralPath $startupCollection.stdout_path -Raw -Encoding UTF8 | ConvertFrom-Json
+                        if (-not $manifest.startup_diagnostics.complete) { throw 'Startup evidence collection was incomplete; partial diagnostics retained.' }
+                    }
+                } catch {
+                    $manifest.startup_diagnostics_error = $_.Exception.Message
+                    $manifest.cleanup_errors += $_.Exception.Message
+                    $manifest.status = 'observation_not_established'
+                    if (-not $manifest.error) { $manifest.error = $_.Exception.Message; $startupNewFailure = $true }
+                }
                 Write-WindowsObservationJson (Join-Path $out 'manifest.json') $manifest
+                if ($startupNewFailure) { throw $manifest.startup_diagnostics_error }
             }
         }
     }
