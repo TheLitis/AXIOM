@@ -34,6 +34,8 @@ The separate [recorded-replay bridge](docs/recorded-replay.md) reproduced the re
 
 The opt-in [Windows input observer](docs/windows-input.md) adds schema-7 Windows message and public Geode streams to gameplay receipts. **Implementation, tests and native build are ready; live Windows qualification is not established.** Two new-package startup attempts and a separate old-package control produced zero exports; their failures and four-file preservation records remain retained. No schema-7 key/button association, hardware authentication or full input equivalence is claimed.
 
+The [startup and observer follow-up](docs/native-startup.md) retains bounded startup files and separates observed exits from timeout/cleanup. It rejects lost observer coverage and resolves pinned Control/Alt candidate normalization without guessing keyboard layouts. Validation passed **880 tests plus 83 subtests, with 2 local symlink skips**, **23 native fault scenarios / 112 checks** and **79 independent archived-startup checks**; the updated adapter compiled. These software and archived-file checks perform no new game execution. Startup cause, live Windows qualification and full M1 remain open.
+
 The separate [native cadence diagnostics](docs/native-cadence.md) analyze retained captures without launching the game. An archived source and three replays passed 2496 independent arithmetic checks: delivered Scheduler arguments still match exactly, while incoming arguments and wall timing differ. Count/wall ratios and stream entry rates remain separate from render FPS, recording overhead and difficulty.
 
 | Available now | Evidence and limits |

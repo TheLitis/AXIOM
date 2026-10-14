@@ -31,6 +31,8 @@ The [Windows input observation checkpoint](windows-input.md) implements an opt-i
 
 The [archived cadence checkpoint](native-cadence.md) adds a separate schema-1 diagnostic report for capture schemas 1–7. Four retained source/replay files passed 2496 independent arithmetic checks without new game execution; software validation passed 801 tests plus 83 subtests. Delivered Scheduler arguments agree exactly, while incoming arguments and wall timing differ. Declared count/wall ratios, stream entry rates, paired interval unions and whole-row phases stay distinct. Render FPS, recording overhead, maximum native throughput, Windows live qualification and full M1 remain unestablished.
 
+The [14 October startup and observer follow-up](native-startup.md) rejects lost window-hook coverage, updates raw/SDK candidate normalization to v2 and preserves bounded startup evidence separately from captures. It adds guarded app/menu markers, explicit timeout and exit-before-cleanup records. Validation passed 880 tests plus 83 subtests with 2 local symlink skips, 23 native fault scenarios / 112 checks and 79 independent retrospective startup checks; the updated package compiled. No game was launched in this follow-up. The old log observations remain unbound to authenticated processes, with startup cause, live schema-7 qualification and full M1 still open.
+
 ## First human benchmark
 
 The initial scientific target is to improve section-success forecasts on new players compared with an independent-window model. Use short controlled challenges before extreme full levels. Vary one suspected mechanism where possible, balance experimental order, repeat across days, preserve failures, and measure the actual reached-state distribution.

@@ -1,6 +1,6 @@
 # Windows-to-game input observations
 
-[Русская версия](windows-input.ru.md) · [Native adapter](native-adapter.md) · [UILayer observations](input-observation.md) · [Recorded replay](recorded-replay.md) · [Roadmap](roadmap.md)
+[Русская версия](windows-input.ru.md) · [Native adapter](native-adapter.md) · [Startup diagnostics](native-startup.md) · [UILayer observations](input-observation.md) · [Recorded replay](recorded-replay.md) · [Roadmap](roadmap.md)
 
 **Implementation, software checks and native build are ready; live Windows qualification is not established.** The opt-in schema-7 observer adds Windows ingress and public Geode events alongside existing UILayer, native-queue and player receipts. Two new-package startup attempts and a separate old-package startup control produced no exports. There is no completed schema-7 observation, device authentication or ordinary-input equivalence. Historical schema-5 observations and schema-6 recorded replays retain their original evidence and scope.
 
@@ -23,7 +23,7 @@ Only the explicitly selected Windows observer uses schema 7, retaining `attempt.
 
 | Field | Contract |
 |---|---|
-| `enabled`, `scope`, `main_thread_id`, `windows` | `active-guarded-sandbox-attempt-foreground-raw-only`; main/raw roles with process/thread/HWND and installed status |
+| `enabled`, `scope`, `main_thread_id`, `windows` | `active-guarded-sandbox-attempt-foreground-raw-only`; main/raw roles with process/thread/HWND and historical successful-attach status |
 | `messages` | At most 2048 ordered paired WNDPROC receipts, per-thread nesting, foreground before/after, wall/input timestamps, raw message parameters and exact native LRESULT |
 | `raw_input` within a message | Keyboard: kind/vkey/scan_code/flags/keyboard_message; mouse: kind/button_flags; no device handle or movement payload |
 | `sdk_events` | At most 2048 public typed event snapshots, phase/context and one `queue_snapshot` at receipt; no private-queue interception |
@@ -32,6 +32,8 @@ Only the explicitly selected Windows observer uses schema 7, retaining `attempt.
 | Timestamp/listener metadata | `Geode-getInputTimestamp-QPC-seconds`, `public-global-listener-receipt`, priority `INT_MIN` |
 
 The inspector exposes `windows_input_observations`. The public global listener propagates without changing data, but may not see events stopped in an earlier key-specific port. Paired message exit can follow the native terminal during in-flight callback draining; that exit is not a newly inferred gameplay action after completion.
+
+`windows[].installed` records successful attachment, not final live-hook status. Normal cleanup does not rewrite that historical declaration. Destruction during an accepting observation, a missing/lost retained hook or invalid ownership on reuse produces an integrity error and prevents a complete observation. The raw-window destruction callback participates in lifetime draining without inventing a `WM_INPUT` record.
 
 ## Lifecycle and timing
 
@@ -45,7 +47,9 @@ Geode transfers raw events through a private mutex queue and pumps them later; i
 
 ## Association contract
 
-Protocol `windows-raw-sdk-ui-compatible-candidates-v1` retains **candidates**. Raw-Windows-to-Geode compatibility requires matching native key/scan/direction or mouse-button flags and a Geode timestamp inside the recorded message's exact `input_timestamp_enter`/`input_timestamp_exit` interval, without a wall-nearness tolerance. A repeated key down remains distinct in the SDK snapshot but matches a raw down. Geode-to-UILayer compatibility requires the same thread, observed ordering and exact key/direction/timestamp; mouse candidates require a left-button press/release matching touch begin/end.
+Protocol `windows-raw-sdk-ui-compatible-candidates-v2` retains **candidates**. Raw-Windows-to-Geode compatibility requires matching the expected SDK native key, scan and direction or mouse-button flags, and a Geode timestamp inside the recorded message's exact `input_timestamp_enter`/`input_timestamp_exit` interval, without a wall-nearness tolerance. A repeated key down remains distinct in the SDK snapshot but matches a raw down. Geode-to-UILayer compatibility requires the same thread, observed ordering and exact key/direction/timestamp; mouse candidates require a left-button press/release matching touch begin/end.
+
+The pinned Geode route converts generic raw `VK_CONTROL`/`VK_MENU` to left/right Control/Alt using `RI_KEY_E0`. The inspector applies that declared conversion only to candidate matching and records `raw_keyboard_normalizations` with source vkey, expected SDK code and status. Original raw and SDK rows remain unchanged. Generic `VK_SHIFT`, vkey 0 and vkey 255 require keyboard-layout mapping context not retained in schema 7; they stay unresolved/unmatched rather than guessing a layout. Explicit left/right Shift vkeys can still match. Wrong-side, out-of-interval and ambiguous candidates retain their existing verdicts.
 
 The report preserves `no_compatible_candidate`, `one_compatible_candidate` and `ambiguous_compatible_candidates`, every raw record and unmatched sequences. An unmatched lifecycle message is not declared a dropped key. A unique candidate remains an observed association under that rule, without hardware authentication or proof that every intermediate queue step was captured.
 
@@ -90,3 +94,9 @@ A same-host independent standard-library audit passed **139 saved-artifact check
 **Still open:** a fresh schema-7 native-clock capture, installed-hook/ingress witnesses, message/typed/UI/queue/player counts and association verdicts, skip/error/focus records and native terminal integrity. There are no schema-7 observed key/button associations to publish. Future manual qualification and focus-recovery checks remain separate gates.
 
 Full ordinary-input equivalence, device/human authentication, complete engine state, general focus/reset recovery, full M1 and calibrated AR remain outside this checkpoint.
+
+## Software follow-up — 14 October 2026
+
+The [startup and observer checkpoint](native-startup.md) adds byte-preserving startup archives, explicit exit/timeout/cleanup diagnostics, guarded app/menu markers, coverage-loss rejection and candidate normalization v2. The full suite passed **880 tests and 83 subtests, with 2 local symlink skips**; a real junction test and four headless console lifecycle checks passed. The production-observer fault harness passed **23 scenarios / 112 checks** with fake Windows/Geode surfaces. The updated native package compiled successfully.
+
+Three old startup attempts were archived separately and passed **79 independent standard-library checks**. Their loader markers remain retrospectively unbound; readiness and exit cause are not established. This follow-up performs no new game execution and leaves the live schema-7 and full ordinary-input gates open. Historical ledger identities above remain unchanged; updated build and study identities are recorded in the linked checkpoint.
