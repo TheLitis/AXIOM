@@ -12,9 +12,11 @@ AXIOM is an open research project for measuring Geometry Dash difficulty through
 
 The central question is: *What is the probability that a player with a specified skill profile completes this exact challenge after a specified amount of practice, under specified technical conditions?*
 
-## Current status: offline laboratory and experimental native observer
+## Current status: offline laboratory and experimental measurement pipeline
 
 The released v0.1.0 is a dependency-free Python laboratory with an interactive offline report. Current development adds an experimental, opt-in Windows x64 / GD 2.2081 / Geode 5.8.2 observer and command-call replay. **Human difficulty remains uncalibrated and the complete M1 acceptance gate remains open.** Native origin declared in an imported file is not authenticated by the Python inspector. There are no established AR scores for real levels, no GRIEF/Slaughterhouse difficulty ratio, and no claim of a universal human limit.
+
+The [M2 engineering pipeline](docs/probe-engineering.md) now plans joint command-offset probes, exports canonical native replay jobs and maps repeated synthetic or supplied native outcomes. The planner supports 1–3 axes, explicit budgets and baseline repeats; errors, missing trials and invalid schedules stay separate from deaths. The runnable synthetic demo covers 25 joint points × 3 repetitions and exposes disconnected accepted samples and coupled-action counterexamples. Native execution, physical timing-window qualification and human calibration remain open.
 
 The [initial native validation ledger](docs/native-validation.md) retains the failed replay comparison. The subsequent [clock investigation](docs/clock-investigation.md) tested two generated fixtures under three clock policies, with three replay completions per case. Exact agreement of all compared fields passed for both fixtures under the explicitly declared fixed Scheduler intervention; the native and fixed gameplay-update policies still diverged. This establishes repeatability of the recorded subset in that experimental environment. Raw captures and game binaries stay local.
 
@@ -46,6 +48,7 @@ The separate [native cadence diagnostics](docs/native-cadence.md) analyze retain
 | Correlated-noise experiments | Seeded Gaussian jitter, common shift, stationary AR(1) drift; declared assumptions, not measured human abilities |
 | Censored first-completion statistics | Kaplan–Meier curve, supported T50, conservative participant bootstrap, compatible provisional AR |
 | Supplied terminal-oracle ledger checks | Exact manifest consistency and observed repeatability; does not run/authenticate the engine |
+| Command-grid probe planning and maps | Bounded joint grids, canonical replay job exchange, a synthetic backend and strict native result import; discrete samples only, no automatic native execution or continuous windows |
 | Experimental native capture and replay | Version-specific Geode source, local opt-in capture, binary manifests, death/finish/ending-phase callbacks, paired gameplay/Scheduler updates and selected player fields; incomplete configuration/state coverage |
 | Native capture inspection/comparison | Strict integrity and identity checks; exact comparison of recorded replay subsets; files alone do not establish complete engine determinism |
 | Declared native fixture matrix | Generated level payloads and input plans, pre-ending mode requirements, exact repeated replay checks and owned-input response controls; [contract and evidence](docs/native-fixture-matrix.md) |

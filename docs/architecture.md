@@ -6,6 +6,8 @@ AXIOM separates evidence acquisition, execution models, learning models, and pub
 
 The offline tool accepts explicitly supplied local windows, simple joint constraints, replay events, level payloads, captured trial tables, and first-completion observations. It validates inputs, performs reproducible seeded window/noise experiments, summarizes censored campaigns with Kaplan-Meier, and exports JSON and a local HTML report. Level inspection and replay inspection are structural descriptions; they do not simulate collisions or prove a run succeeds.
 
+The [command-grid pipeline](probe-engineering.md) implements a separate M2 planning/execution/import/map boundary. It freezes a qualified schema-4/5 source, enumerates bounded joint command offsets, exports exact native replay bytes and admits synthetic backend results or validated native capture references. The map contains repeated discrete samples, control status and coupling counterexamples. It does not convert samples to continuous timing constraints, and its native executor remains an external handoff.
+
 Synthetic fixtures are labeled synthetic. Externally measured inputs remain externally measured and unverified unless an engine-evidence package is audited. A result generated from mathematical windows is conditional on those windows. Captured trial-table validation checks reported identity and full-run oracle fields; it does not independently reproduce the run or authenticate the collector. Successful finite timing samples are not proof of a continuously feasible interval between those samples. Reports must keep those limitations next to numerical results.
 
 ```mermaid
@@ -17,6 +19,10 @@ flowchart LR
     D --> F[Evidence-aware JSON and HTML]
     E --> F
     G[Experimental native capture and replay] -. selected run evidence .-> B
+    G --> P[Bounded probe study and replay jobs]
+    P --> Q[Synthetic backend / supplied capture import]
+    Q --> T[Repeated discrete sample map]
+    T --> B
     H[Future calibrated human and learning models] -. forecasts .-> F
 ```
 
@@ -28,6 +34,9 @@ flowchart LR
 | Level inspector | Decode known serialization fields and report objects/settings | Exact hitboxes, active trigger semantics, or physical reachability |
 | Replay inspector | Normalize documented formats, presses/releases, players, and clocks | Compatibility with every macro format or successful native playback |
 | Experimental native observer | Record version-specific callbacks, binary identities, declared clocks and selected state; replay an explicit owned-channel plan | Complete state/configuration coverage, ordinary-input equivalence, checkpoints or automatic timing-window measurement |
+| Probe planner and execution exchange | Enumerate 1–3 command-offset axes, preserve input order, bound requests, repeat baseline first and materialize canonical plans | Physics outcomes inferred from planned input or command calls converted into hardware milliseconds |
+| Probe backend and capture importer | Separate synthetic terminal witnesses from raw native captures; preserve errors and enforce exact identity/full-start evidence | An automated native backend, independent authentication or checkpoint restoration |
+| Discrete probe map | Repeated accepted/death samples, missing/inconsistent states, discrete components, axis slices and observed coupling counterexamples | Continuously feasible intervals, complete trajectory determinism, human success probability or AR |
 | Constraint analyzer | Membership in supplied local/joint feasible regions | Discovery of the complete feasible set in the game |
 | Execution baseline | Seeded, declared correlated noise; conditional success and numerical uncertainty | Human calibration or perception-aware control |
 | Survival baseline | Risk sets, censoring, descriptive median where supported | A causal learning model or unbiased predictions under informative dropout |
