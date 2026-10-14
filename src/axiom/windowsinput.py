@@ -291,6 +291,20 @@ def _candidate_status(candidates: list) -> str:
     )
 
 
+def _keyboard_native_mapping(raw: dict) -> tuple[str, int | None]:
+    """Resolve only transformations determined by the pinned recorded fields."""
+    code = raw["vkey"]
+    if code == 0x11:  # Geode getActualVKey: generic VK_CONTROL and RI_KEY_E0.
+        return "e0_control_side", 0xA3 if raw["flags"] & 2 else 0xA2
+    if code == 0x12:  # Generic VK_MENU is normalized to left/right Alt.
+        return "e0_alt_side", 0xA5 if raw["flags"] & 2 else 0xA4
+    if code in {0, 0xFF, 0x10}:
+        # SHIFT and unknown raw VKeys call MapVirtualKeyEx/GetKeyboardLayout in
+        # the raw thread. Schema 7 does not record that mapping context.
+        return "keyboard_layout_mapping_not_recorded", None
+    return "unchanged_raw_vkey", code
+
+
 def _packet_compatible(message: dict, sdk: dict) -> bool:
     raw, payload = message["raw_input"], sdk["data"]
     if (
@@ -301,8 +315,10 @@ def _packet_compatible(message: dict, sdk: dict) -> bool:
         return False
     if sdk["event"] == SDK_KEYBOARD and raw["kind"] == "keyboard":
         action = "release" if raw["flags"] & 1 or raw["keyboard_message"] == 257 else "press"
+        _, code = _keyboard_native_mapping(raw)
         return (
-            payload["native_code"] == raw["vkey"]
+            code is not None
+            and payload["native_code"] == code
             and payload["native_extra"] == raw["scan_code"]
             and ("press" if payload["action"] == "repeat" else payload["action"]) == action
         )
@@ -368,7 +384,7 @@ def summarize_windows_input(capture: dict) -> dict:
             }
         )
     return {
-        "protocol": "windows-raw-sdk-ui-compatible-candidates-v1",
+        "protocol": "windows-raw-sdk-ui-compatible-candidates-v2",
         "scope": data["scope"],
         "enabled": data["enabled"],
         "main_thread_id": data["main_thread_id"],
@@ -377,6 +393,16 @@ def summarize_windows_input(capture: dict) -> dict:
         "sdk_listener_phase": data["sdk_listener_phase"],
         "sdk_listener_priority": data["sdk_listener_priority"],
         "messages": data["messages"],
+        "raw_keyboard_normalizations": [
+            {
+                "message_sequence": row["sequence"],
+                "source_vkey": row["raw_input"]["vkey"],
+                "status": _keyboard_native_mapping(row["raw_input"])[0],
+                "expected_sdk_native_code": _keyboard_native_mapping(row["raw_input"])[1],
+            }
+            for row in data["messages"]
+            if row["raw_input"] is not None and row["raw_input"]["kind"] == "keyboard"
+        ],
         "sdk_events": sdk_rows,
         "delivery_correlations": delivery_rows,
         "integrity": data["integrity"],
@@ -412,6 +438,7 @@ def summarize_windows_input(capture: dict) -> dict:
             "Only the process-owned main lifecycle and foreground raw-input windows are observed; skipped counters retain excluded scope.",
             "Public global listener receipts are partial event-bus coverage; a specific-key listener can stop delivery before this observer.",
             "Raw-to-SDK candidates use typed packet/action/native code and scan/button plus the packet's Geode timestamp interval, without wall-nearness matching.",
+            "Generic Control/Alt use the pinned Geode E0 side normalization; generic Shift and raw VKey 0/255 require unrecorded keyboard-layout mapping and remain unmatched.",
             "SDK-to-UI candidates use same thread, observed ordering and exact key/action/timestamp; they do not prove private enqueue/pop identity or final mutable dispatch result.",
             "Every unmatched and ambiguous candidate is retained; one compatible candidate is not authenticated causal ownership.",
             "Window handles, thread/process IDs, wall times and raw QPC values are scoped diagnostics, not stable cross-run identities or device authentication.",
