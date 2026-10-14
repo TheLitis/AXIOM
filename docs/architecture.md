@@ -6,7 +6,7 @@ AXIOM separates evidence acquisition, execution models, learning models, and pub
 
 The offline tool accepts explicitly supplied local windows, simple joint constraints, replay events, level payloads, captured trial tables, and first-completion observations. It validates inputs, performs reproducible seeded window/noise experiments, summarizes censored campaigns with Kaplan-Meier, and exports JSON and a local HTML report. Level inspection and replay inspection are structural descriptions; they do not simulate collisions or prove a run succeeds.
 
-The [command-grid pipeline](probe-engineering.md) implements a separate M2 planning/execution/import/map boundary. It freezes a qualified schema-4/5 source, enumerates bounded joint command offsets, exports exact native replay bytes and admits synthetic backend results or validated native capture references. The map contains repeated discrete samples, control status and coupling counterexamples. It does not convert samples to continuous timing constraints, and its native executor remains an external handoff.
+The [command-grid pipeline](probe-engineering.md) implements a separate M2 planning/execution/import/map boundary. It freezes a validated schema-4/5 source, enumerates bounded joint command offsets, exports exact native replay bytes and admits synthetic backend results or validated native capture references. Its [automatic native executor](native-probe-executor.md) now supplies the Windows capture-producing backend, with fresh runtimes, exclusive profile leases, owned process cleanup, four-file restoration and per-attempt checkpoints. The map contains repeated discrete samples, control status and coupling counterexamples; it does not convert samples to continuous timing constraints. Software validation here uses synthetic captures and real console processes, with no live GD execution or closure of M1/M2.
 
 Synthetic fixtures are labeled synthetic. Externally measured inputs remain externally measured and unverified unless an engine-evidence package is audited. A result generated from mathematical windows is conditional on those windows. Captured trial-table validation checks reported identity and full-run oracle fields; it does not independently reproduce the run or authenticate the collector. Successful finite timing samples are not proof of a continuously feasible interval between those samples. Reports must keep those limitations next to numerical results.
 
@@ -21,6 +21,8 @@ flowchart LR
     G[Experimental native capture and replay] -. selected run evidence .-> B
     G --> P[Bounded probe study and replay jobs]
     P --> Q[Synthetic backend / supplied capture import]
+    P --> W[Owned Windows job executor]
+    W --> Q
     Q --> T[Repeated discrete sample map]
     T --> B
     H[Future calibrated human and learning models] -. forecasts .-> F
@@ -35,7 +37,8 @@ flowchart LR
 | Replay inspector | Normalize documented formats, presses/releases, players, and clocks | Compatibility with every macro format or successful native playback |
 | Experimental native observer | Record version-specific callbacks, binary identities, declared clocks and selected state; replay an explicit owned-channel plan | Complete state/configuration coverage, ordinary-input equivalence, checkpoints or automatic timing-window measurement |
 | Probe planner and execution exchange | Enumerate 1–3 command-offset axes, preserve input order, bound requests, repeat baseline first and materialize canonical plans | Physics outcomes inferred from planned input or command calls converted into hardware milliseconds |
-| Probe backend and capture importer | Separate synthetic terminal witnesses from raw native captures; preserve errors and enforce exact identity/full-start evidence | An automated native backend, independent authentication or checkpoint restoration |
+| Probe backend and capture importer | Separate synthetic terminal witnesses from raw native captures; preserve errors and enforce exact identity/full-start evidence | Independent authentication, arbitrary Python callback cancellation or engine checkpoint restoration |
+| Automatic native executor | Strict frozen exchanges, new full-start runtimes, exclusive isolated-profile lease, owned process deadline/cancellation, four-file restore and cumulative checkpoints | Live qualification from console tests, full machine-state preservation, continuous windows or human difficulty |
 | Discrete probe map | Repeated accepted/death samples, missing/inconsistent states, discrete components, axis slices and observed coupling counterexamples | Continuously feasible intervals, complete trajectory determinism, human success probability or AR |
 | Constraint analyzer | Membership in supplied local/joint feasible regions | Discovery of the complete feasible set in the game |
 | Execution baseline | Seeded, declared correlated noise; conditional success and numerical uncertainty | Human calibration or perception-aware control |
@@ -44,6 +47,8 @@ flowchart LR
 | Evidence report | Keep identities, assumptions, source hashes, warnings, and reproducible settings attached | Validation by visual polish or a large numerical sample alone |
 
 Evidence states are distinct: **synthetic**, **externally measured**, **native verified**, and **human calibrated** describe origins or validation, not successive values of a generic accuracy score. A physical witness and a calibrated human forecast answer different questions.
+
+Execution reports preserve partial/error batches. Map construction failure retains `executor.json` with explicit `map_error` and nullable map path/hash. Confirmed launch count is a lower bound; missing final worker metadata produces an uncertain count and `new_native_execution=null` when no launch is confirmed. The worker's game deadline is separate from the self-managed deadline of an arbitrary synchronous Python backend. [Executor artifacts and control flow](native-probe-executor.md).
 
 The v0.1 challenge record uses `id`, `level_sha256`, `game_version`, `physics_version`, `input_policy`, and `environment_id`. Experimental native captures additionally retain binary/source identities and declared input/clock policies, but their configuration and state coverage remain incomplete; the full target manifest is below. For the offline Gaussian baseline, independent per-action error, a common run shift, and stationary AR(1) drift have separately declared scales; serial correlation is a sensitivity assumption. Route membership also checks same-channel press/release ordering. A Wilson interval summarizes numerical sampling error conditional on all these inputs.
 
