@@ -31,6 +31,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/test-native-startup.ps1
+      - name: Check owned native probe process lifecycle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-native-probe-process.ps1
       - run: uv run --locked axiom demo
       - run: uv run --locked python -m build
       - run: uv run --locked python -m axiom --version
