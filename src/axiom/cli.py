@@ -56,6 +56,32 @@ def parser():
         "--baseline", type=Path, help="Prelaunch inventory; otherwise retrospectively unbound"
     )
     startup_collect.set_defaults(json=None)
+    probe_plan = commands.add_parser(
+        "probe-plan", help="Plan bounded full-start command-offset probes from a validated reference"
+    )
+    probe_plan.add_argument("reference", type=Path, help="Completed schema-4/5 owned fixed-Scheduler capture")
+    probe_plan.add_argument("spec", type=Path, help="Frozen axes, repetitions and run budget")
+    probe_export = commands.add_parser(
+        "probe-export", help="Materialize canonical native replay files and an execution job manifest"
+    )
+    probe_export.add_argument("study", type=Path)
+    probe_export.add_argument("--output", type=Path, required=True, help="Fresh exchange directory")
+    probe_export.set_defaults(json=None)
+    probe_map = commands.add_parser(
+        "probe-map", help="Build a discrete map from synthetic or hash-bound native probe results"
+    )
+    probe_map.add_argument("study", type=Path)
+    probe_map.add_argument("results", type=Path)
+    probe_demo = commands.add_parser(
+        "probe-demo", help="Run a disconnected coupled synthetic grid through the measurement pipeline"
+    )
+    probe_demo.add_argument(
+        "--reference", type=Path, default=Path("examples/probes/synthetic-reference.json")
+    )
+    probe_demo.add_argument("--spec", type=Path, default=Path("examples/probes/coupled-grid.json"))
+    probe_demo.add_argument(
+        "--out", type=Path, default=Path("reports/probe-demo"), help="Fresh output directory"
+    )
     compare = commands.add_parser(
         "native-compare", help="Compare recorded subsets of repeated native replays"
     )
@@ -121,6 +147,9 @@ def parser():
         native,
         cadence,
         startup,
+        probe_plan,
+        probe_map,
+        probe_demo,
         compare,
         delivery,
         recorded_plan,
@@ -195,6 +224,22 @@ def main(argv=None):
             from .startup import collect_startup_evidence
 
             result = collect_startup_evidence(args.runtime, args.attempt_manifest, args.output, args.baseline)
+        elif args.command == "probe-plan":
+            from .probeplan import create_probe_study
+
+            result = create_probe_study(args.reference, args.spec)
+        elif args.command == "probe-export":
+            from .proberun import materialize_probe_study
+
+            result = materialize_probe_study(args.study, args.output)
+        elif args.command == "probe-map":
+            from .probes import analyze_probe_results
+
+            result = analyze_probe_results(args.study, args.results)
+        elif args.command == "probe-demo":
+            from .probes import synthetic_probe_demo
+
+            result = synthetic_probe_demo(args.reference, args.spec, args.out)
         elif args.command == "native-compare":
             from .native import compare_native_captures
 
@@ -244,7 +289,12 @@ def main(argv=None):
             render_report(args.out / "index.html", timing=timing, cohort=cohort)
             print(f"Synthetic demo report: {(args.out / 'index.html').resolve()}")
             return 0
-        write_json(args.json, result)
+        if args.command in {"probe-plan", "probe-map", "probe-demo"} and args.json:
+            from .proberun import write_probe_json
+
+            write_probe_json(args.json, result)
+        else:
+            write_json(args.json, result)
         return 0
     except (ValueError, OSError) as exc:
         print(f"axiom: {exc}", file=sys.stderr)

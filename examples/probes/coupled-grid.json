@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "kind": "native_probe_spec",
+  "id": "synthetic-coupled-command-grid",
+  "axes": [
+    {
+      "event_index": 0,
+      "offsets_commands": [
+        -2,
+        -1,
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "event_index": 1,
+      "offsets_commands": [
+        -2,
+        -1,
+        0,
+        1,
+        2
+      ]
+    }
+  ],
+  "repetitions": 3,
+  "run_budget": 75
+}
