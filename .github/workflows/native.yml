@@ -2,9 +2,9 @@ name: Native adapter build
 
 on:
   push:
-    paths: ['native/**', 'scripts/build-native.ps1', '.github/workflows/native.yml']
+    paths: ['native/**', 'scripts/build-native.ps1', 'scripts/test-native-observer.ps1', '.github/workflows/native.yml']
   pull_request:
-    paths: ['native/**', 'scripts/build-native.ps1', '.github/workflows/native.yml']
+    paths: ['native/**', 'scripts/build-native.ps1', 'scripts/test-native-observer.ps1', '.github/workflows/native.yml']
   workflow_dispatch:
 
 permissions:
@@ -19,6 +19,9 @@ jobs:
       - name: Build pinned Geode adapter without installing or launching the game
         shell: pwsh
         run: ./scripts/build-native.ps1 -Jobs 4
+      - name: Test observer faults with fake Windows APIs without launching the game
+        shell: pwsh
+        run: ./scripts/test-native-observer.ps1 -Jobs 4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: axiom-native-windows-x64

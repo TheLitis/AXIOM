@@ -148,13 +148,22 @@ LRESULT CALLBACK observer(HWND window, UINT message, WPARAM wparam, LPARAM lpara
         }
         session = std::atomic_load(&current);
         bool selected = session &&
-            ((hook.rawWindow && message == WM_INPUT) || (!hook.rawWindow && focusMessage(message)));
+            ((hook.rawWindow && (message == WM_INPUT || message == WM_NCDESTROY)) ||
+                (!hook.rawWindow && focusMessage(message)));
         if (selected) {
             std::lock_guard lock(session->mutex);
             if (session->accepting.load(std::memory_order_acquire)) {
                 ++session->inFlight;
                 inFlight = admitted = true;
             }
+        }
+        if (admitted && message == WM_NCDESTROY) {
+            error(session, hook.rawWindow ? "Raw Windows input window destroyed during active capture" :
+                "Main Windows input window destroyed during active capture");
+            // The raw lifecycle participates in the callback barrier but is
+            // not fabricated as a schema-7 foreground WM_INPUT packet. Main
+            // lifecycle rows retain their existing paired/export-scope path.
+            if (hook.rawWindow) admitted = false;
         }
         foreground = admitted && GetForegroundWindow() == session->mainWindow;
         if (admitted && hook.rawWindow && !foreground) {
@@ -257,8 +266,10 @@ Hook attach(SessionPtr const& session, HWND window, bool rawWindow) {
     auto existing = hooks.find(window);
     auto previous = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(window, GWLP_WNDPROC));
     if (previous == observer) {
-        if (existing == hooks.end() || !existing->second.previous)
-            throw std::runtime_error("Existing observer predecessor is unavailable");
+        if (existing == hooks.end() || !existing->second.previous || !existing->second.installed ||
+                existing->second.thread != result.thread || existing->second.process != result.process ||
+                existing->second.rawWindow != rawWindow)
+            throw std::runtime_error("Existing observer ownership or installed predecessor is unavailable");
         session->declarations[declaration] = existing->second;
         return existing->second;
     }
@@ -311,9 +322,20 @@ void detach(SessionPtr const& session) {
     std::lock_guard lock(registryMutex);
     for (auto const& declaration : session->declarations) {
         auto found = hooks.find(declaration.window);
-        if (found == hooks.end() || !found->second.installed) continue;
+        if (found == hooks.end()) {
+            if (declaration.installed) error(session, "Installed Windows input hook missing from retained registry");
+            continue;
+        }
+        if (!found->second.installed) {
+            if (declaration.installed) error(session, "Declared Windows input hook no longer installed before snapshot");
+            continue;
+        }
         auto& hook = found->second;
-        if (!IsWindow(hook.window)) { hook.installed = false; continue; }
+        if (!IsWindow(hook.window)) {
+            error(session, "Observed Windows input window unavailable before restoration");
+            hook.installed = false;
+            continue;
+        }
         auto actual = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(hook.window, GWLP_WNDPROC));
         if (actual != observer) {
             error(session, "Windows procedure replaced above observer; retained inert forwarding context");
