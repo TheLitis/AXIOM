@@ -82,6 +82,24 @@ def parser():
     probe_demo.add_argument(
         "--out", type=Path, default=Path("reports/probe-demo"), help="Fresh output directory"
     )
+    probe_run = commands.add_parser(
+        "probe-run", help="Execute frozen jobs serially through the pinned Windows sandbox"
+    )
+    probe_run.add_argument("exchange", type=Path, help="Validated probe-export directory")
+    probe_run.add_argument("--workspace", type=Path, help="AXIOM checkout containing scripts and .tools")
+    probe_run.add_argument("--game-directory", type=Path, required=True)
+    probe_run.add_argument("--native-package", type=Path, required=True)
+    probe_run.add_argument(
+        "--level", type=Path, required=True, help="Exact plain level bytes from the reference"
+    )
+    probe_run.add_argument("--output", type=Path, required=True, help="Fresh evidence directory")
+    probe_run.add_argument(
+        "--timeout-seconds", type=int, default=90, help="Worker-owned game deadline, 30–600"
+    )
+    probe_run.add_argument("--max-jobs", type=int, help="Explicit partial batch budget, 1–4096")
+    probe_run.add_argument(
+        "--keep-going", action="store_true", help="Continue after execution/capture errors"
+    )
     compare = commands.add_parser(
         "native-compare", help="Compare recorded subsets of repeated native replays"
     )
@@ -150,6 +168,7 @@ def parser():
         probe_plan,
         probe_map,
         probe_demo,
+        probe_run,
         compare,
         delivery,
         recorded_plan,
@@ -240,6 +259,20 @@ def main(argv=None):
             from .probes import synthetic_probe_demo
 
             result = synthetic_probe_demo(args.reference, args.spec, args.out)
+        elif args.command == "probe-run":
+            from .nativeprobe import WindowsSandboxCaptureBackend, run_native_probe_jobs
+
+            workspace = args.workspace or Path(__file__).resolve().parents[2]
+            backend = WindowsSandboxCaptureBackend(
+                workspace,
+                args.game_directory,
+                args.native_package,
+                args.level,
+                timeout_seconds=args.timeout_seconds,
+            )
+            result = run_native_probe_jobs(
+                args.exchange, backend, args.output, max_jobs=args.max_jobs, keep_going=args.keep_going
+            )
         elif args.command == "native-compare":
             from .native import compare_native_captures
 
@@ -289,12 +322,21 @@ def main(argv=None):
             render_report(args.out / "index.html", timing=timing, cohort=cohort)
             print(f"Synthetic demo report: {(args.out / 'index.html').resolve()}")
             return 0
-        if args.command in {"probe-plan", "probe-map", "probe-demo"} and args.json:
+        if args.command in {"probe-plan", "probe-map", "probe-demo", "probe-run"} and args.json:
             from .proberun import write_probe_json
 
             write_probe_json(args.json, result)
         else:
             write_json(args.json, result)
+        if args.command == "probe-run":
+            if result["stop_reason"] == "cancelled":
+                return 130
+            if (
+                result["error_jobs"]
+                or result["map_error"]
+                or result["stop_reason"] in {"job_error", "input_changed", "preflight_error", "map_error"}
+            ):
+                return 2
         return 0
     except (ValueError, OSError) as exc:
         print(f"axiom: {exc}", file=sys.stderr)
